@@ -44,16 +44,17 @@ request), on `jev-1.13.0`, from Buenos Aires:
 | skill exact | 81.5% | **94.4%** | +13.0pp |
 | skill missed | 28.0% | **4.0%** | +24.0pp |
 | skill false positive | **3.4%** | 6.9% | −3.4pp |
-| tier within 1 | 92.6% | **96.3%** | +3.7pp |
-| tier too cheap | 31.5% | **9.3%** | +22.2pp |
-| tier exact | **64.8%** | 51.9% | −13.0pp |
+| tier within 1 | 92.6% | 92.6% | ±0 |
+| tier too cheap | 31.5% | **1.9%** | +29.6pp |
+| tier exact | **64.8%** | 53.7% | −11.1pp |
 | tool recall | 61.2% | **68.6%** | +7.4pp |
 | tool precision | **58.7%** | 52.1% | −6.6pp |
 
 Read the tier rows together. The heuristic hits the exact tier more often but
-under-provisions on a third of turns; the router is within one tier 94% of the time and
-under-provisions on 9%. Too big shows up on the bill. Too small shows up as a worse
-answer nobody notices.
+under-provisions on a third of turns; the router matches it on staying within one tier
+and under-provisions on 1.9%. Too big shows up on the bill. Too small shows up as a
+worse answer nobody notices, which is why the estimator is deliberately biased against
+it.
 
 The tool-precision loss is partly a labelling artefact: the fixtures list only the tools
 a turn strictly cannot be done without, so a defensible extra tool scores as an error.
@@ -121,6 +122,22 @@ the abandoned request runs to completion, the socket goes back to the pool clean
 `onLate` puts the answer that eventually arrives into the cache, so re-sending that turn
 is free. Only the caller's own signal aborts, because that is a real cancellation.
 
+**Route on the distribution, not on the expectation.** Asked how much work
+"escribí el ADR de por qué elegimos Kafka sobre SQS" needs, Jev answered
+`{0: 0.45, 1: 0.08, 2: 0.04, 3: 0.43}` — two readings of the turn, not one middling one.
+Its expectation, 1.46, describes neither, and thresholding it sent a design task to the
+cheapest model. Policy now reads the 0.60 quantile of the distribution instead, which
+routes that turn to the top tier and takes under-provisioning across the fixtures from
+7.4% to 1.9%. The docs say to read `score` and `probabilities` together; this is what
+that looks like once you actually do it.
+
+The same finding killed a threshold. `escalateConfidence` — escalate a tier when the
+model is unsure — came from the confidence-routing pattern, which is about *Choice*
+confidence, and the jaggedness page is explicit that a threshold tuned on one primitive
+does not carry to another. Half these turns have a Score confidence under 0.5, so at the
+pattern's 0.5 the safety net was the default path. It ships at 0, and a grid over 270
+combinations confirms that is better.
+
 **A constant computed at import is not configurable.** `DEFAULT_DEADLINE_MS` read its
 environment variable at module scope, and ESM hoists every `import` above the module
 body — so it was fixed before any CLI's `loadEnv()` ran, and `npm run calibrate` wrote a
@@ -140,7 +157,12 @@ touches; `policy.ts` maps that onto a model. Swapping in a new model is an edit 
 catalogue file, with no prompt changes.
 
 **Choice and Noul answer different questions, so both are used.** A `Choice` is relative
-and always names a winner. A `Noul` is absolute and can come back low for everything.
+and always names a winner. A `Noul` is absolute and can come back low for everything. On
+"escribí el ADR", `tool::Write` came back at 0.33 as a Noul — will the assistant *have
+to* create a file? not necessarily, an ADR can go in the reply — and at 0.79 in the
+ranking Choice, because *if* any tool is involved it is obviously that one. Both are
+right, and the policy refuses to let the relative one clear the absolute bar on a
+write-risk tool.
 Tool selection is multi-label and often empty, so every tool gets its own `Noul`; the
 ranking `Choice` is read only for its runner-ups. Skills use the mirror image: the
 `Choice` settles *which*, the gate `Noul`s settle *whether*. Their thresholds are tuned

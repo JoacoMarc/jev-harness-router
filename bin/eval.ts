@@ -232,24 +232,47 @@ console.log("\ngate x skillConfidence — skill exact % (false positive %)");
   );
 }
 
-console.log("\ntier cuts");
-console.log(
-  table([
-    ["cuts", "exact", "within 1", "too cheap"],
-    ...([
-      [0.5, 1.5],
-      [0.8, 2.2],
-      [1.0, 2.0],
-      [1.2, 2.4],
-      [1.4, 2.4],
-      [1.6, 2.6],
-      [1.8, 2.6],
-      [2.0, 2.8],
-      [2.2, 2.9],
-    ] as const).map((tierCuts) => {
-      const s = score("cuts", samples.map((sample) => route(sample, { ...DEFAULT_THRESHOLDS, tierCuts })));
-      return [`[${tierCuts.join(", ")}]`, pct(s.tierExact), pct(s.tierWithin1), pct(s.tierTooCheap)];
-    }),
+function tierSweep(label: string, rows: readonly (readonly [string, Thresholds])[]): void {
+  console.log(`\n${label}`);
+  console.log(
+    table([
+      [label, "exact", "within 1", "too cheap"],
+      ...rows.map(([name, t]) => {
+        const s = score(name, samples.map((sample) => route(sample, t)));
+        return [name, pct(s.tierExact), pct(s.tierWithin1), pct(s.tierTooCheap)];
+      }),
+    ]),
+  );
+}
+
+// How far up the difficulty distribution to read. The expectation is 0.5-ish; higher
+// values believe whatever mass sits at the hard end, which is the asymmetry the router
+// is built on.
+tierSweep(
+  "difficulty quantile",
+  [0.5, 0.6, 0.7, 0.75, 0.8, 0.9].map((difficultyQuantile) => [
+    difficultyQuantile.toFixed(2),
+    { ...DEFAULT_THRESHOLDS, difficultyQuantile },
+  ]),
+);
+
+// Copied from the confidence-routing pattern, which is about Choice confidence. The
+// jaggedness page says a threshold tuned on one primitive does not carry to another, and
+// half these turns have a Score confidence under 0.5, so this rule may be firing as the
+// default path rather than as a safety net. 0 disables it.
+tierSweep(
+  "escalate on low difficulty confidence",
+  [0, 0.1, 0.2, 0.3, 0.5, 0.7].map((escalateConfidence) => [
+    escalateConfidence.toFixed(2),
+    { ...DEFAULT_THRESHOLDS, escalateConfidence },
+  ]),
+);
+
+tierSweep(
+  "tier cuts (on difficulty level)",
+  ([[1, 2], [1, 3], [2, 3], [2, 4], [3, 4]] as const).map((tierCuts) => [
+    `[${tierCuts.join(", ")}]`,
+    { ...DEFAULT_THRESHOLDS, tierCuts },
   ]),
 );
 

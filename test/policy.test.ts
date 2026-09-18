@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THRESHOLDS, decide, gateScore, margin } from "../src/policy.ts";
+import { DEFAULT_THRESHOLDS, decide, gateScore, margin, scoreQuantile } from "../src/policy.ts";
 import { SKILL_IDS, TIERS, TOOL_IDS, type SkillId, type ToolId } from "../src/catalog/index.ts";
 
 // Named from the catalogue, never written out, so these tests survive replacing it.
@@ -66,11 +66,22 @@ describe("model tier and effort", () => {
     expect(d.tier).toBe("balanced");
   });
 
-  it("escalates rather than guesses when difficulty confidence is low", () => {
-    const sure = decide(answers({ difficulty: 0.1, difficultyConfidence: 0.95 }), TOOL_IDS);
-    const unsure = decide(answers({ difficulty: 0.1, difficultyConfidence: 0.2 }), TOOL_IDS);
-    expect(sure.tier).toBe("fast");
-    expect(unsure.tier).toBe("balanced");
+  it("ships with confidence-based escalation switched off, on purpose", () => {
+    // It came from the confidence-routing pattern, which is about Choice confidence.
+    // Half of these turns have a Score confidence under 0.5, so at the pattern's 0.5 the
+    // "escalate when unsure" net was the default path. Reading the distribution handles
+    // that uncertainty properly instead.
+    expect(DEFAULT_THRESHOLDS.escalateConfidence).toBe(0);
+    const unsure = decide(answers({ difficulty: 0.1, difficultyConfidence: 0 }), TOOL_IDS);
+    expect(unsure.tier).toBe(TIERS[0]);
+  });
+
+  it("still escalates on low confidence when a catalogue asks for it", () => {
+    const t = { ...DEFAULT_THRESHOLDS, escalateConfidence: 0.5 };
+    const sure = decide(answers({ difficulty: 0.1, difficultyConfidence: 0.95 }), TOOL_IDS, t);
+    const unsure = decide(answers({ difficulty: 0.1, difficultyConfidence: 0.2 }), TOOL_IDS, t);
+    expect(sure.tier).toBe(TIERS[0]);
+    expect(unsure.tier).toBe(TIERS[1]);
     expect(unsure.why.join(" ")).toMatch(/low, escalating/);
   });
 
@@ -78,6 +89,54 @@ describe("model tier and effort", () => {
     const d = decide(answers({ difficulty: 2.9, difficultyConfidence: 0.1 }), TOOL_IDS);
     expect(d.tier).toBe("deep");
     expect(d.effort).toBe("xhigh");
+  });
+});
+
+describe("bimodal difficulty", () => {
+  it("believes the hard end when the model splits between two readings", () => {
+    // The answer that motivated reading a quantile instead of the expectation. Live, on
+    // "escribí el ADR de por qué elegimos Kafka sobre SQS", jev returned
+    // {0: 0.45, 1: 0.08, 2: 0.04, 3: 0.43} — two readings of the turn, not one middling
+    // one. Its expectation of 1.46 describes neither, and routing on it sent a design
+    // task to the cheapest model.
+    const d = decide(
+      answers({ difficulty: 1.46, difficultyProbabilities: { "0": 0.45, "1": 0.08, "2": 0.04, "3": 0.43 } }),
+      TOOL_IDS,
+    );
+    expect(d.tier).toBe(TIERS[TIERS.length - 1]);
+    expect(d.diagnostics.difficulty).toBeCloseTo(1.46, 2);
+  });
+
+  it("still reads a confident easy answer as easy", () => {
+    const d = decide(
+      answers({ difficulty: 0, difficultyProbabilities: { "0": 1, "1": 0, "2": 0, "3": 0 } }),
+      TOOL_IDS,
+    );
+    expect(d.tier).toBe(TIERS[0]);
+  });
+
+  it("is not fooled by an expectation that no level actually holds", () => {
+    // Same expectation, opposite shapes: one genuinely middling, one split to the ends.
+    const middling = decide(answers({ difficulty: 1.5 }), TOOL_IDS);
+    const split = decide(
+      answers({ difficulty: 1.5, difficultyProbabilities: { "0": 0.5, "3": 0.5 } }),
+      TOOL_IDS,
+    );
+    expect(split.tier).not.toBe(middling.tier);
+  });
+});
+
+describe("scoreQuantile", () => {
+  it("returns the level where cumulative probability crosses the quantile", () => {
+    expect(scoreQuantile({ "0": 1 }, 0.75)).toBe(0);
+    expect(scoreQuantile({ "0": 0.5, "1": 0.5 }, 0.75)).toBe(1);
+    expect(scoreQuantile({ "0": 0.8, "1": 0.2 }, 0.75)).toBe(0);
+    expect(scoreQuantile({ "0": 0.45, "1": 0.08, "2": 0.04, "3": 0.43 }, 0.75)).toBe(3);
+  });
+
+  it("survives an empty or short distribution", () => {
+    expect(scoreQuantile({}, 0.75)).toBe(0);
+    expect(scoreQuantile({ "2": 1 }, 0.99)).toBe(2);
   });
 });
 

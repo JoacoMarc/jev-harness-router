@@ -27,8 +27,23 @@ export const CLOSED_GATES: Record<(typeof GATE_IDS)[number], number> = {
   prose_suffices: 0.95,
 };
 
+/**
+ * The canonical two-point distribution with expectation `score`.
+ *
+ * Policy reads a quantile of the distribution rather than the expectation, so a Score
+ * answer without probabilities is not a Score answer. Tests that care about a bimodal
+ * shape pass `probabilities` explicitly instead.
+ */
+export function scoreSpread(score: number): Record<string, number> {
+  const floor = Math.floor(score);
+  const frac = score - floor;
+  return frac === 0 ? { [floor]: 1 } : { [floor]: 1 - frac, [floor + 1]: frac };
+}
+
 export interface AnswerSpec {
   difficulty?: number;
+  /** Overrides `difficulty`'s implied spread, for testing bimodal answers. */
+  difficultyProbabilities?: Record<string, number>;
   difficultyConfidence?: number;
   scope?: number;
   intent?: string;
@@ -55,14 +70,14 @@ export function answers(spec: AnswerSpec = {}): RouterAnswers {
       score: spec.difficulty ?? 1,
       confidence: spec.difficultyConfidence ?? 0.9,
       legend: {},
-      probabilities: {},
+      probabilities: spec.difficultyProbabilities ?? scoreSpread(spec.difficulty ?? 1),
     },
     [Q.scope]: {
       type: "score",
       score: spec.scope ?? 0,
       confidence: 0.9,
       legend: {},
-      probabilities: {},
+      probabilities: scoreSpread(spec.scope ?? 0),
     },
     [Q.intent]: {
       type: "choice",
@@ -148,12 +163,13 @@ export function fakeJev(options: FakeJevOptions = {}): Fetch {
       if (question.type === "noul") {
         out[id] = { type: "noul", noul: options.noul ?? 0 };
       } else if (question.type === "score") {
+        const score = options.score ?? 0;
         out[id] = {
           type: "score",
-          score: options.score ?? 0,
+          score,
           confidence: 0.9,
           legend: {},
-          probabilities: {},
+          probabilities: scoreSpread(score),
         };
       } else {
         const labels = Object.keys(question.criteria);

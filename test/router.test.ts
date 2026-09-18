@@ -74,7 +74,13 @@ describe("lane 3: Jev, and the deadline behind it", () => {
       fetch: fakeJev({
         answers: {
           ...gatesOpen,
-          [Q.difficulty]: { type: "score", score: 3, confidence: 0.9, legend: {}, probabilities: {} },
+          [Q.difficulty]: {
+            type: "score",
+            score: 3,
+            confidence: 0.9,
+            legend: {},
+            probabilities: { "3": 1 },
+          },
           "tool::Read": { type: "noul", noul: 0.9 },
           "tool::Bash": { type: "noul", noul: 0.9 },
         },

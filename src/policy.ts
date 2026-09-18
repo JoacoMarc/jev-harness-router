@@ -50,11 +50,18 @@ export interface Thresholds {
   readonly fits: number;
   /** How many finalists the second hop reads properly. */
   readonly shortlist: number;
-  /** Difficulty expectation at or above which the tier steps up. Length must be TIERS-1. */
+  /**
+   * Quantile of the difficulty distribution to read, in place of its expectation.
+   * 0.5 is the median; higher leans toward whatever mass sits at the hard end.
+   */
+  readonly difficultyQuantile: number;
+  /** Same, for scope. */
+  readonly scopeQuantile: number;
+  /** Difficulty level at or above which the tier steps up. Length must be TIERS-1. */
   readonly tierCuts: readonly number[];
-  /** Difficulty expectation at or above which effort steps up. Length must be EFFORTS-1. */
+  /** Difficulty level at or above which effort steps up. Length must be EFFORTS-1. */
   readonly effortCuts: readonly number[];
-  /** Scope expectation at or above which the tier is floored at `scopeFloorTier`. */
+  /** Scope level at or above which the tier is floored at `scopeFloorTier`. */
   readonly scopeFloor: number;
   /**
    * Index into `TIERS` that a broad-scope turn is floored at. An index rather than a
@@ -82,8 +89,19 @@ export interface Thresholds {
  *   `produces_artifact` restored a real interior optimum (0.10 -> 87.0%, 0.20 -> 92.6%,
  *   0.30 -> 90.7%, 0.40 -> 79.6%), which is what a threshold doing useful work looks
  *   like. A flat or monotonic sweep is a sign the question is missing, not the number.
- * - `tierCuts` [2.0, 2.8] gives 51.9% exact and 94.4% within one tier, against 33.3% and
- *   77.8% at [0.8, 2.2]. Jev's difficulty expectation runs high against these labels.
+ * - Tier is read as the 0.60 quantile of the difficulty distribution with cuts at levels
+ *   [2, 3]: 51.9% exact, 92.6% within one tier, and **0% under-provisioned**. Routing on
+ *   the expectation instead scored the same on exactness and better on within-one, but
+ *   sent 7.4% of turns to a model too small for them — and that is the error that hides.
+ *   A grid over 270 combinations found no setting that beat it on under-provisioning.
+ *
+ * - `escalateConfidence` is 0, which switches the rule off. It came from the
+ *   confidence-routing pattern, which is about *Choice* confidence, and the jaggedness
+ *   page is explicit that a threshold tuned on one primitive does not carry to another.
+ *   Half of these turns have a Score confidence under 0.5, so at 0.5 the "escalate when
+ *   unsure" safety net was the default path rather than a net. Reading the distribution
+ *   handles the same uncertainty properly; the sweep puts it 3.7pp ahead with the rule
+ *   off. It stays as a knob because a catalogue with better-separated levels may want it.
  * - `toolScale` stays at 1. Raising it scores better only because it disables `Bash`
  *   outright, and for a router recall matters more than precision: a missing tool blocks
  *   the turn, an extra one costs a little context.
@@ -95,13 +113,15 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   gate: 0.2,
   skillConfidence: 0.6,
   toolTail: 0.25,
-  escalateConfidence: 0.5,
+  escalateConfidence: 0,
   rerankMargin: 0.35,
   fits: 0.3,
   shortlist: 3,
-  tierCuts: [2.0, 2.8],
-  effortCuts: [0.8, 1.8, 2.6],
-  scopeFloor: 1.5,
+  difficultyQuantile: 0.6,
+  scopeQuantile: 0.6,
+  tierCuts: [2, 3],
+  effortCuts: [1, 2, 3],
+  scopeFloor: 2,
   scopeFloorTier: 1,
   toolScale: 1,
 };
@@ -138,6 +158,35 @@ function bucket<T>(ladder: readonly T[], cuts: readonly number[], value: number)
   let index = 0;
   for (const cut of cuts) if (value >= cut) index += 1;
   return ladder[Math.min(index, ladder.length - 1)] as T;
+}
+
+/**
+ * The lowest level whose cumulative probability reaches `q`.
+ *
+ * Read instead of the expectation, because the expectation lies on a bimodal answer and
+ * bimodal answers are common here. "escribí el ADR" came back
+ * `{0: 0.45, 1: 0.08, 2: 0.04, 3: 0.43}` — the model seeing two readings of the turn, not
+ * one middling one — and its expectation of 1.46 describes neither. A high quantile also
+ * encodes the asymmetry the whole router is built on: under-provisioning is the error
+ * that hides, so when the distribution has real mass up top, believe the top.
+ *
+ * The docs are explicit that a Score's `score` and `probabilities` must be read
+ * together; this is what reading them together looks like in code.
+ */
+export function scoreQuantile(
+  probabilities: Readonly<Record<string, number>>,
+  q: number,
+): number {
+  const levels = Object.keys(probabilities)
+    .map(Number)
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+  let cumulative = 0;
+  for (const level of levels) {
+    cumulative += probabilities[String(level)] ?? 0;
+    if (cumulative >= q) return level;
+  }
+  return levels[levels.length - 1] ?? 0;
 }
 
 /** Difference between the top two probabilities. 1 for a single option, 0 for a tie. */
@@ -181,14 +230,19 @@ export function decide(
   const intent = answers[Q.intent];
 
   // ---- model tier and effort -------------------------------------------------
-  let tier = bucket(TIERS, thresholds.tierCuts, difficulty.score);
-  let effort = bucket(EFFORTS, thresholds.effortCuts, difficulty.score);
-  why.push(`difficulty ${difficulty.score.toFixed(2)} -> ${tier}/${effort}`);
+  const difficultyLevel = scoreQuantile(difficulty.probabilities, thresholds.difficultyQuantile);
+  const scopeLevel = scoreQuantile(scope.probabilities, thresholds.scopeQuantile);
 
-  if (scope.score >= thresholds.scopeFloor) {
+  let tier = bucket(TIERS, thresholds.tierCuts, difficultyLevel);
+  let effort = bucket(EFFORTS, thresholds.effortCuts, difficultyLevel);
+  why.push(
+    `difficulty level ${difficultyLevel} (expectation ${difficulty.score.toFixed(2)}) -> ${tier}/${effort}`,
+  );
+
+  if (scopeLevel >= thresholds.scopeFloor) {
     const floor = tierAt(thresholds.scopeFloorTier);
     const floored = maxTier(tier, floor);
-    if (floored !== tier) why.push(`scope ${scope.score.toFixed(2)} floors tier at ${floor}`);
+    if (floored !== tier) why.push(`scope level ${scopeLevel} floors tier at ${floor}`);
     tier = floored;
   }
 
