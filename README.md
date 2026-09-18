@@ -29,10 +29,14 @@ route.source;  // "jev" | "cache" | "shortcut" | "fallback"
 ```bash
 npm install
 cp .env.example .env     # then put your key in it
-npx tsx bin/route.ts "arreglá el bug de auth en el login"
+npm run calibrate        # measure your network, write your deadline
+
+npx tsx bin/route.ts     # interactive: type turns, watch them route
 ```
 
-Everything runs offline with `MOCK=1`, which answers from the local heuristic and says so.
+Interactive mode warms the connection once instead of once per turn, which is the shape
+a real harness runs in and the honest way to get a feel for the thing. Everything also
+runs offline with `MOCK=1`, which answers from the local heuristic and says so.
 
 ## Measured
 
@@ -208,6 +212,7 @@ npm run lint
 npm run calibrate        # measure your network, write your deadline into .env
 npm run calibrate -- --coverage 98 --dry-run
 
+npx tsx bin/route.ts                     # interactive: type turns, see routes
 npx tsx bin/route.ts "<turn>" [--rerank] [--deadline 500] [--strings] [--cold]
 npm run eval                                    # accuracy vs the heuristic + sweeps
 npm run eval -- --dump fixtures/answers.json    # keep the raw answers
