@@ -8,6 +8,7 @@
   },
   "scripts": {
     "route": "tsx bin/route.ts",
+    "calibrate": "tsx bin/calibrate.ts",
     "eval": "tsx bin/eval.ts",
     "bench": "tsx bin/bench.ts",
     "typecheck": "tsc --noEmit",

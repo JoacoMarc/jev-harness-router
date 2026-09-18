@@ -4,7 +4,7 @@
  *   npx tsx bin/route.ts "arreglá el bug de auth en el login"
  *   echo "..." | npx tsx bin/route.ts --rerank --deadline 800
  */
-import { DEFAULT_DEADLINE_MS } from "../src/jev.ts";
+import { defaultDeadlineMs } from "../src/jev.ts";
 import { createRouter } from "../src/router.ts";
 import { renderSkillBlock } from "../src/prompt.ts";
 import { USD_PER_INPUT_TOKEN } from "../src/types.ts";
@@ -35,7 +35,7 @@ if (!message) {
 
 requireKey();
 
-const deadlineMs = Number(value("deadline") ?? DEFAULT_DEADLINE_MS);
+const deadlineMs = Number(value("deadline") ?? defaultDeadlineMs());
 const router = createRouter({
   deadlineMs,
   rerank: flag("rerank"),

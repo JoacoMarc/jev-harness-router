@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_THRESHOLDS, decide, gateScore, margin } from "../src/policy.ts";
-import { TIERS, TOOL_IDS, type ToolId } from "../src/catalog/index.ts";
+import { SKILL_IDS, TIERS, TOOL_IDS, type SkillId, type ToolId } from "../src/catalog/index.ts";
+
+// Named from the catalogue, never written out, so these tests survive replacing it.
+const A = SKILL_IDS[0] as SkillId;
+const B = SKILL_IDS[1] as SkillId;
 import { answers } from "./helpers.ts";
 
 /**
@@ -133,8 +137,8 @@ describe("skill selection", () => {
   };
 
   it("applies a confident skill when the gates are open", () => {
-    const d = decide(answers({ gates: gatesOpen, skill: "ita-commit", skillConfidence: 0.9 }), TOOL_IDS);
-    expect(d.skill).toBe("ita-commit");
+    const d = decide(answers({ gates: gatesOpen, skill: A, skillConfidence: 0.9 }), TOOL_IDS);
+    expect(d.skill).toBe(A);
   });
 
   it("suppresses the skill when the gates say no action is wanted", () => {
@@ -146,7 +150,7 @@ describe("skill selection", () => {
           produces_artifact: 0.05,
           prose_suffices: 0.95,
         },
-        skill: "ita-commit",
+        skill: A,
         skillConfidence: 0.95,
       }),
       TOOL_IDS,
@@ -157,7 +161,7 @@ describe("skill selection", () => {
 
   it("suppresses a winner the ranking is not confident about", () => {
     const d = decide(
-      answers({ gates: gatesOpen, skill: "ita-commit", skillConfidence: 0.1 }),
+      answers({ gates: gatesOpen, skill: A, skillConfidence: 0.1 }),
       TOOL_IDS,
     );
     expect(d.skill).toBeNull();
@@ -170,11 +174,11 @@ describe("skill selection", () => {
 
   it("flags a contested ranking as worth a second hop", () => {
     const contested = decide(
-      answers({ gates: gatesOpen, skill: "docx", skillMass: 0.34 }),
+      answers({ gates: gatesOpen, skill: B, skillMass: 0.34 }),
       TOOL_IDS,
     );
     const decisive = decide(
-      answers({ gates: gatesOpen, skill: "docx", skillMass: 0.99 }),
+      answers({ gates: gatesOpen, skill: B, skillMass: 0.99 }),
       TOOL_IDS,
     );
     expect(contested.diagnostics.rerankWorthwhile).toBe(true);
@@ -182,7 +186,7 @@ describe("skill selection", () => {
   });
 
   it("never proposes a second hop once the gates have closed", () => {
-    const d = decide(answers({ skill: "docx", skillMass: 0.34 }), TOOL_IDS);
+    const d = decide(answers({ skill: B, skillMass: 0.34 }), TOOL_IDS);
     expect(d.diagnostics.rerankWorthwhile).toBe(false);
   });
 });

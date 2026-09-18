@@ -22,7 +22,15 @@ export type { RouterAnswers, RouterQuestions } from "./questions.ts";
 export { buildState, availableTools } from "./state.ts";
 export { heuristicRoute, isShortcut } from "./heuristic.ts";
 
-export { Jev, JevError, MissingKeyError, DEFAULT_DEADLINE_MS, DEFAULT_MODEL } from "./jev.ts";
+export {
+  Jev,
+  JevError,
+  MissingKeyError,
+  defaultDeadlineMs,
+  DEADLINE_ENV,
+  FALLBACK_DEADLINE_MS,
+  DEFAULT_MODEL,
+} from "./jev.ts";
 
 export * from "./catalog/index.ts";
 export type {

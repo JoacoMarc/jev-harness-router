@@ -42,13 +42,13 @@ request), on `jev-1.13.0`, from Buenos Aires:
 | | heuristic | jev | |
 | --- | --- | --- | --- |
 | skill exact | 81.5% | **94.4%** | +13.0pp |
-| skill missed | 28.0% | **0.0%** | +28.0pp |
+| skill missed | 28.0% | **4.0%** | +24.0pp |
 | skill false positive | **3.4%** | 6.9% | −3.4pp |
 | tier within 1 | 92.6% | **96.3%** | +3.7pp |
 | tier too cheap | 31.5% | **9.3%** | +22.2pp |
 | tier exact | **64.8%** | 51.9% | −13.0pp |
-| tool recall | 61.2% | **67.3%** | +6.1pp |
-| tool precision | **58.7%** | 51.3% | −7.4pp |
+| tool recall | 61.2% | **68.6%** | +7.4pp |
+| tool precision | **58.7%** | 52.1% | −6.6pp |
 
 Read the tier rows together. The heuristic hits the exact tier more often but
 under-provisions on a third of turns; the router is within one tier 94% of the time and
@@ -58,23 +58,31 @@ answer nobody notices.
 The tool-precision loss is partly a labelling artefact: the fixtures list only the tools
 a turn strictly cannot be done without, so a defensible extra tool scores as an error.
 
+Latency, across five benchmark runs on different days and network conditions:
+
 ```
-jev round trip        p50 351ms   p95 444ms   p99 657ms       (150 samples, warmed)
-end to end            p50 347ms   p95 450ms   max 470ms       fell back 0/50
-cost                  4,015 input tokens per call             $0.169 per 1,000 turns
+p50                   351–376ms      barely moves
+p95                   444–1006ms     moves a lot
+end to end, max       470–605ms      bounded by the deadline, by construction
+fell back             0–8 of 50      0% to 16%, depending on the day
+cost                  4,015 input tokens per call    $0.169 per 1,000 turns
 ```
 
-98% of calls land inside the 600 ms deadline. The remaining tail is long enough to matter
-— an unwarmed process sees p99 over a second — which is why the deadline exists rather
-than being something to tune away.
+That spread is the honest result, and the single prettiest run is not quoted on its own
+because it would be misleading. The median is stable and the tail is not, which is
+precisely the condition a deadline plus a fallback is for: the router cannot make the
+network reliable, but it can stop an unreliable network from reaching the turn. The
+end-to-end max never exceeds the deadline, whatever the tail does.
 
 `npm run bench` prints all of this, plus the batching ablation and the deadline curve.
 
 ## What the measurements changed
 
-**The deadline is 600 ms, not the 400 ms this was designed with.** A bare TCP connect to
-`api.typesafe.ai` from here is 217 ms, so ~300 ms is a floor no amount of tuning moves.
-At 400 ms, 24–39% of turns fell back to the heuristic; at 600 ms it is 2%.
+**The deadline is calibrated, not chosen.** A bare TCP connect to `api.typesafe.ai` from
+Buenos Aires is 217 ms, so ~300 ms is a floor no amount of tuning moves — and from
+somewhere closer it would be much lower. `npm run calibrate` measures the round trip from
+wherever you are and writes the deadline that hits your target coverage into `.env`. The
+shipped 600 ms is only what applies when nothing has been calibrated.
 
 **State size is not the lever here, contrary to the usual advice.** Ten times the tokens
 changed the round trip by nothing — 306 tokens took 371 ms, 3,199 took 325 ms. The docs'
@@ -96,9 +104,13 @@ ranking had already named at confidence 0.99. Adding a fourth question about pro
 structured work product restored a real interior optimum (0.10 → 87.0%, **0.20 → 92.6%**,
 0.30 → 90.7%, 0.40 → 79.6%) and took skill accuracy to 94.4%.
 
-**The second hop stays off.** Only 2% of turns have a skill ranking contested enough to
-want one. `--rerank` gates it on the top-two margin and on whatever is left of the
-deadline.
+**The second hop stays off,** and now refuses to run when it would learn nothing. Only
+2–4% of turns have a contested enough ranking to want one. Worse, once structured
+criteria became the default for the *first* pass, a rerank was re-reading the identical
+text — a round trip for nothing. Skill cards now carry a `detail` field that only the
+second pass sends, and `rerankAddsEvidence()` skips the call when no finalist has one.
+That is what progressive disclosure has to mean: the finalists are judged against
+something the ranking never saw, or there is no point asking twice.
 
 **A timeout must not abort the request.** This one cost the most to find. Aborting on the
 deadline tears down the pooled TLS connection, and re-establishing it costs about as much
@@ -108,6 +120,11 @@ fallback/jev/fallback/jev indefinitely. The deadline is now enforced by a timer 
 the abandoned request runs to completion, the socket goes back to the pool clean, and
 `onLate` puts the answer that eventually arrives into the cache, so re-sending that turn
 is free. Only the caller's own signal aborts, because that is a real cancellation.
+
+**A constant computed at import is not configurable.** `DEFAULT_DEADLINE_MS` read its
+environment variable at module scope, and ESM hoists every `import` above the module
+body — so it was fixed before any CLI's `loadEnv()` ran, and `npm run calibrate` wrote a
+value that everything then ignored. It is a function now.
 
 ## The design, in five decisions
 
@@ -166,7 +183,10 @@ npm test                 # 73 tests, no key, no network
 npm run typecheck
 npm run lint
 
-npx tsx bin/route.ts "<turn>" [--rerank] [--deadline 600] [--strings]
+npm run calibrate        # measure your network, write your deadline into .env
+npm run calibrate -- --coverage 98 --dry-run
+
+npx tsx bin/route.ts "<turn>" [--rerank] [--deadline 500] [--strings] [--cold]
 npm run eval                                    # accuracy vs the heuristic + sweeps
 npm run eval -- --dump fixtures/answers.json    # keep the raw answers
 npm run eval -- --replay fixtures/answers.json  # re-sweep offline, zero API calls
@@ -179,46 +199,66 @@ turns is a small sample and the labels are one person's judgement.
 
 ## Making it yours
 
-The catalogues that ship here are one person's Claude Code setup. They are example data,
-not the product — the product is everything around them. Three files to edit, and nothing
-else has to change:
+The catalogues that ship here are one person's Claude Code setup in Spanish and English.
+They are example data, not the product. **Everything that knows who you are lives in
+`src/catalog/`** — no other file names a tool, a skill, a tier, or a model provider.
+
+```bash
+npm install
+cp .env.example .env          # your key goes here; .env is gitignored
+npm run calibrate             # measures your network, writes your deadline
+```
+
+Then edit four files. Each one is a plain `as const` object, and the types flow from it:
+delete a tool and the compiler finds every reference; add a skill and
+`answers["skill::which"].choice` widens to include it, with no cast anywhere.
 
 | file | what to put there |
 | --- | --- |
-| `src/catalog/models.ts` | your model ids, ordered cheapest to most capable |
-| `src/catalog/tools.ts` | the tools your harness can offer, with a risk class each |
-| `src/catalog/skills.ts` | your skills, one line of description each |
+| `src/catalog/models.ts` | your model ids, **ordered cheapest to most capable** — the order is the ladder, and the names are yours |
+| `src/catalog/tools.ts` | the tools your harness can offer, each with a risk class that sets its enable threshold |
+| `src/catalog/skills.ts` | your skills, **ordered specific before general** — that order is the heuristic's precedence |
+| `src/catalog/shortcuts.ts` | the bare acknowledgements in your users' language, and your command prefix |
 
-They are plain `as const` objects, and the types flow from them. Delete a tool and the
-compiler finds every place that referenced it; add a skill and
-`answers["skill::which"].choice` widens to include it, with no cast anywhere. That is the
-one thing you get for free.
+Every card can carry `hints`: regexes used **only** by the offline heuristic, which is
+both the fallback and the baseline the eval scores against. Jev never sees them — it
+reads `description`. A card with no hints simply never fires there, which is a fine place
+to start. Patterns are matched against diacritic-folded text, so write them unaccented:
+`arregl\w*` catches "arreglá".
 
-Everything else you have to earn back by measuring:
+Skill cards can also carry `detail`, a longer paragraph sent **only on the optional
+second hop**. Without it a rerank re-reads what already ranked the skill, so the router
+skips the call rather than paying for it.
 
-1. **Replace `fixtures/turns.jsonl`** with 50+ real turns from your own harness, labelled
-   with the route you would have wanted. This is the part that actually takes effort, and
-   it is the part that makes the rest meaningful.
-2. **Re-tune the thresholds.** `npm run eval` sweeps them and prints the curves.
-   `DEFAULT_THRESHOLDS` in `src/policy.ts` holds values fitted to *these* fixtures on
-   *this* network; they are a starting point for you, not an answer.
-3. **Update the heuristic** in `src/heuristic.ts`. Its keyword patterns name specific
-   skills from the example catalogue and are written for Spanish and English. It is both
-   the fallback and the baseline the eval scores against, so a stale one makes the router
-   look better than it is.
-4. **Re-measure the deadline.** `DEFAULT_DEADLINE_MS` is 600 because a TCP connect to the
-   API is 217 ms from Buenos Aires. From somewhere closer, 400 ms may be plenty.
-   `npm run bench` prints the coverage curve to read it off.
+The prompt block is configurable too — `renderSkillBlock(route, { tag, suggest, none })`
+if `<skill_relevance>` is not your convention. Keep the two properties the wording was
+measured for: say the suggestion can be ignored, and say something even when nothing
+applies.
 
-A generic, catalogue-parameterised version would remove step 1's coupling to this repo's
-shape. It is not built: the `as const` catalogues are what give the end-to-end typing its
-teeth, and making them a type parameter costs that clarity for a benefit only a second
-user gets.
+### What you cannot inherit
+
+Three things in this repo are empirical, and copying them across setups is how a router
+looks good in a README and bad in production.
+
+1. **The fixtures.** `fixtures/turns.jsonl` is 54 turns I wrote and labelled myself.
+   Replace them with real turns from your own harness, labelled with the route you
+   actually wanted. This is the part that takes real effort and the part that makes
+   everything downstream mean anything.
+2. **The thresholds.** `DEFAULT_THRESHOLDS` in `src/policy.ts` is fitted to those
+   fixtures. `npm run eval` sweeps every one of them and prints the curves;
+   `npm run eval -- --replay fixtures/answers.json` re-sweeps offline for free, because
+   the policy is pure. Watch for a sweep with no interior peak — that means a question is
+   missing, not a number (see above).
+3. **The deadline.** `npm run calibrate`, and re-run it if you move or your network
+   changes.
+
+`npm run eval` compares against the heuristic every time, so if your catalogue makes the
+router worse than a page of regexes on some dimension, the table says so. Believe it.
 
 ## Layout
 
 ```
-src/catalog/       models, tools, skills — `as const`, so answer types derive from them
+src/catalog/       models, tools, skills, shortcuts — the only files that know who you are
 src/state.ts       the compact object Jev evaluates, with its truncation budget
 src/questions.ts   every question, pure
 src/policy.ts      answers -> decision, pure
@@ -226,6 +266,7 @@ src/heuristic.ts   the fallback, and the eval baseline
 src/jev.ts         the only module that talks to TypeSafe
 src/router.ts      shortcut -> cache -> jev(deadline) -> policy
 src/prompt.ts      the block that goes after your cached prefix
+bin/calibrate.ts   measures your round trip, writes your deadline
 ```
 
 ## Things worth knowing before you tune it

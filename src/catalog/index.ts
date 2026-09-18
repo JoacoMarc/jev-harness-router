@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { MODELS } from "./models.ts";
 import { SKILLS } from "./skills.ts";
 import { TOOLS } from "./tools.ts";
+import { CONTINUATIONS } from "./shortcuts.ts";
 
 export * from "./models.ts";
 export * from "./skills.ts";
 export * from "./tools.ts";
+export * from "./shortcuts.ts";
 
 /**
  * A fingerprint of every catalogue entry that reaches the model.
@@ -15,6 +17,6 @@ export * from "./tools.ts";
  * even for a byte-identical turn.
  */
 export const CATALOG_VERSION = createHash("sha256")
-  .update(JSON.stringify({ MODELS, TOOLS, SKILLS }))
+  .update(JSON.stringify({ MODELS, TOOLS, SKILLS, shortcuts: [...CONTINUATIONS] }))
   .digest("hex")
   .slice(0, 12);

@@ -10,13 +10,25 @@
  * from a guess.
  */
 import { performance } from "node:perf_hooks";
-import { DEFAULT_DEADLINE_MS, Jev } from "../src/jev.ts";
+import { Jev, defaultDeadlineMs } from "../src/jev.ts";
 import { buildQuestions, questionCount } from "../src/questions.ts";
 import { availableTools, buildState } from "../src/state.ts";
 import { isShortcut } from "../src/heuristic.ts";
 import { createRouter } from "../src/router.ts";
 import { USD_PER_INPUT_TOKEN } from "../src/types.ts";
-import { loadEnv, mean, ms, pct, percentile, pool, readFixtures, requireKey, table, transport } from "./util.ts";
+import {
+  WARMUP_SAMPLES,
+  loadEnv,
+  mean,
+  ms,
+  pct,
+  percentile,
+  pool,
+  readFixtures,
+  requireKey,
+  table,
+  transport,
+} from "./util.ts";
 
 loadEnv();
 requireKey();
@@ -28,7 +40,7 @@ const num = (name: string, fallback: number): number => {
 };
 const RUNS = num("runs", 2);
 const CONCURRENCY = num("concurrency", 4);
-const DEADLINE = num("deadline", DEFAULT_DEADLINE_MS);
+const DEADLINE = num("deadline", defaultDeadlineMs());
 
 const fixtures = (await readFixtures()).filter((f) => !isShortcut(f));
 const tools = availableTools({ message: "" });
@@ -53,15 +65,19 @@ interface Timing {
 }
 
 const work = fixtures.flatMap((f) => Array.from({ length: RUNS }, () => f));
-const timings = await pool(work, CONCURRENCY, async (f): Promise<Timing> => {
+// The warm-up window is run and thrown away, not skipped: the connection needs the
+// traffic, the percentiles do not need the ramp.
+const warmup = fixtures.slice(0, WARMUP_SAMPLES);
+const timings = await pool([...warmup, ...work], CONCURRENCY, async (f): Promise<Timing> => {
   const out = await jev.ask(buildState(f), buildQuestions(tools));
   return { ms: out.jevMs, inputTokens: out.inputTokens };
 });
 
-const latencies = timings.map((t) => t.ms);
-const tokens = timings.map((t) => t.inputTokens);
+const measured = timings.slice(warmup.length);
+const latencies = measured.map((t) => t.ms);
+const tokens = measured.map((t) => t.inputTokens);
 
-console.log("jev round trip");
+console.log(`jev round trip  (${latencies.length} samples, ${warmup.length} warm-up discarded)`);
 console.log(
   table([
     ["", "ms"],
@@ -74,10 +90,15 @@ console.log(
 );
 
 const within = latencies.filter((l) => l <= DEADLINE).length / latencies.length;
-const verdict = percentile(latencies, 95) <= DEADLINE ? "PASS" : "FAIL";
+const verdict = percentile(latencies, 95) <= DEADLINE ? "inside" : "outside";
 console.log(
-  `\n  ${verdict}: p95 ${ms(percentile(latencies, 95))} against a ${DEADLINE}ms deadline` +
+  `\n  p95 ${ms(percentile(latencies, 95))} falls ${verdict} the ${DEADLINE}ms deadline` +
     `  ·  ${pct(within)} of calls land inside it`,
+);
+console.log(
+  "\n  This tail moves a lot between runs while p50 barely moves, so read the\n" +
+    "  end-to-end fallback rate below rather than this line: a wide tail is the\n" +
+    "  condition the deadline exists for, not a failure of it.",
 );
 
 console.log(

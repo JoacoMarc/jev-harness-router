@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { MIN_RERANK_MS, createRouter } from "../src/router.ts";
 import { DEFAULT_THRESHOLDS } from "../src/policy.ts";
+import { DEADLINE_ENV, FALLBACK_DEADLINE_MS } from "../src/jev.ts";
 import { Q, gateId } from "../src/questions.ts";
 import { renderSkillBlock, systemPromptParts } from "../src/prompt.ts";
-import { EFFORTS, TIERS } from "../src/catalog/index.ts";
+import { EFFORTS, SKILL_IDS, TIERS, type SkillId } from "../src/catalog/index.ts";
+
+// Named from the catalogue, never written out, so these tests survive replacing it.
+const A = SKILL_IDS[0] as SkillId;
+const B = SKILL_IDS[1] as SkillId;
+const C = SKILL_IDS[2] as SkillId;
 import { distribution, fakeJev } from "./helpers.ts";
 
 const gatesOpen = {
@@ -124,9 +130,9 @@ describe("the second hop", () => {
     ...gatesOpen,
     [Q.skill]: {
       type: "choice",
-      choice: "docx",
+      choice: A,
       confidence: 0.55,
-      probabilities: distribution(["docx", "pdf", "ltmsoft-doc-create", "none"], "docx", 0.4),
+      probabilities: distribution([A, B, C, "none"], A, 0.4),
     },
   };
 
@@ -145,7 +151,7 @@ describe("the second hop", () => {
       deadlineMs: 5_000,
       fetch: fakeJev({
         calls,
-        answers: { ...contested, "fits::docx": { type: "noul", noul: 0.8 } },
+        answers: { ...contested, [`fits::${A}`]: { type: "noul", noul: 0.8 } },
       }),
     });
     const route = await router.route({ message: "armá el documento de la propuesta" });
@@ -164,16 +170,16 @@ describe("the second hop", () => {
           ...gatesOpen,
           [Q.skill]: {
             type: "choice",
-            choice: "trello-cli",
+            choice: B,
             confidence: 0.99,
-            probabilities: distribution(["trello-cli", "docx", "none"], "trello-cli", 0.99),
+            probabilities: distribution([B, A, "none"], B, 0.99),
           },
         },
       }),
     });
-    const route = await router.route({ message: "movelo a En Progreso en el trello" });
+    const route = await router.route({ message: "a turn whose ranking is decisive" });
     expect(calls.n).toBe(1);
-    expect(route.skill).toBe("trello-cli");
+    expect(route.skill).toBe(B);
   });
 
   it("does not start a second hop it cannot finish in the budget", async () => {
@@ -224,7 +230,7 @@ describe("unavailable tools", () => {
 describe("the prompt block", () => {
   it("keeps the roster byte-identical and appends the suggestion after it", async () => {
     const roster = "ROSTER TEXT THAT MUST NOT MOVE";
-    const withSkill = systemPromptParts(roster, { skill: "ita-commit" });
+    const withSkill = systemPromptParts(roster, { skill: A });
     const without = systemPromptParts(roster, { skill: null });
 
     // Anything spliced into the prefix costs a prefix-cache miss on every turn, which
@@ -235,7 +241,7 @@ describe("the prompt block", () => {
   });
 
   it("tells the model it may ignore the suggestion", () => {
-    expect(renderSkillBlock({ skill: "ita-commit" })).toMatch(/Ignore this if it does not fit/);
+    expect(renderSkillBlock({ skill: A })).toMatch(/Ignore this if it does not fit/);
   });
 
   it("still says something when nothing applies", () => {
@@ -247,13 +253,30 @@ describe("the prompt block", () => {
 });
 
 describe("defaults", () => {
-  it("ships a deadline above the measured network floor and below a second", () => {
-    // A bare TCP connect to the API is 217ms from here, so anything under ~300ms would
-    // fall back on essentially every turn. Above a second it stops being a router you
-    // can afford to put in front of every turn.
+  it("ships a deadline above any plausible network floor and below a second", () => {
+    // A bare TCP connect to the API is 217ms from Buenos Aires, so anything under ~300ms
+    // would fall back on essentially every turn from there. Above a second it stops
+    // being a router you can afford in front of every turn. `npm run calibrate` narrows
+    // this to wherever you actually are.
     const router = createRouter();
     expect(router.deadlineMs).toBeGreaterThan(300);
     expect(router.deadlineMs).toBeLessThanOrEqual(1000);
+  });
+
+  it("honours a calibrated deadline from the environment, read at call time", () => {
+    const previous = process.env[DEADLINE_ENV];
+    try {
+      process.env[DEADLINE_ENV] = "777";
+      expect(createRouter().deadlineMs).toBe(777);
+      // Garbage falls back rather than producing a router with a NaN deadline.
+      process.env[DEADLINE_ENV] = "not-a-number";
+      expect(createRouter().deadlineMs).toBe(FALLBACK_DEADLINE_MS);
+      delete process.env[DEADLINE_ENV];
+      expect(createRouter().deadlineMs).toBe(FALLBACK_DEADLINE_MS);
+    } finally {
+      if (previous === undefined) delete process.env[DEADLINE_ENV];
+      else process.env[DEADLINE_ENV] = previous;
+    }
   });
 
   it("ships thresholds that are internally consistent", () => {

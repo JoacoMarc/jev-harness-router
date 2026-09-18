@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { SKILLS } from "../src/catalog/index.ts";
 import {
   DIFFICULTY_LEVELS,
   GATE_IDS,
@@ -8,11 +9,16 @@ import {
   buildRerankQuestions,
   gateId,
   questionCount,
+  rerankAddsEvidence,
   skillCriteria,
   toolId,
 } from "../src/questions.ts";
 import type { RouterAnswers } from "../src/questions.ts";
 import { SKILL_IDS, TOOL_IDS, type SkillId, type ToolId } from "../src/catalog/index.ts";
+
+const A = SKILL_IDS[0] as SkillId;
+const B = SKILL_IDS[1] as SkillId;
+const C = SKILL_IDS[2] as SkillId;
 
 describe("buildQuestions", () => {
   const questions = buildQuestions(TOOL_IDS);
@@ -82,13 +88,18 @@ describe("buildQuestions", () => {
 describe("skillCriteria", () => {
   it("can still emit plain strings, with the neighbour warning folded in", () => {
     const plain = skillCriteria(false);
-    expect(typeof plain["ita-commit"]).toBe("string");
-    expect(String(plain["ita-commit"])).toMatch(/Not for: .*ita-create-pr/);
+    expect(typeof plain[A]).toBe("string");
+    // Every example card that declares a neighbour folds the warning into its string.
+    const withNeighbour = SKILL_IDS.find((id) => "notFor" in SKILLS[id]) as SkillId;
+    expect(String(plain[withNeighbour])).toMatch(/Not for: /);
   });
 
   it("defaults to what / not_for / examples objects, which measured better", () => {
     const structured = skillCriteria() as Record<string, Record<string, unknown>>;
-    expect(structured["ita-commit"]).toMatchObject({
+    const rich = SKILL_IDS.find(
+      (id) => "notFor" in SKILLS[id] && "examples" in SKILLS[id],
+    ) as SkillId;
+    expect(structured[rich]).toMatchObject({
       what: expect.any(String),
       not_for: expect.any(String),
       examples: expect.any(Array),
@@ -103,7 +114,7 @@ describe("skillCriteria", () => {
 });
 
 describe("buildRerankQuestions", () => {
-  const names: SkillId[] = ["docx", "pdf", "ltmsoft-doc-create"];
+  const names: SkillId[] = [A, B, C];
   const questions = buildRerankQuestions(names);
 
   it("pairs the shortlist Choice with one absolute Noul per finalist", () => {
@@ -115,11 +126,22 @@ describe("buildRerankQuestions", () => {
     expect(Object.keys(questions[Q.skill].criteria)).toContain("none");
   });
 
+  it("knows when a second hop would learn nothing", () => {
+    // The whole justification for another round trip is that the finalists are re-read
+    // against something the ranking never saw. If no finalist carries `detail`, they are
+    // not, and the router skips the call rather than paying for a re-read.
+    const withDetail = SKILL_IDS.filter((id) => "detail" in SKILLS[id]);
+    const without = SKILL_IDS.filter((id) => !("detail" in SKILLS[id]));
+    expect(rerankAddsEvidence(withDetail.slice(0, 2))).toBe(true);
+    expect(rerankAddsEvidence(without.slice(0, 2))).toBe(false);
+    expect(rerankAddsEvidence([])).toBe(false);
+  });
+
   it("spends more words on each finalist than the wide pass did", () => {
     // Progressive disclosure is the only honest reason to pay for a second round trip:
     // the finalists are re-read against better evidence than the ranking had.
-    const wide = String(buildQuestions(TOOL_IDS)[Q.skill].criteria.docx);
-    const close = String(questions[Q.skill].criteria.docx);
+    const wide = JSON.stringify(buildQuestions(TOOL_IDS)[Q.skill].criteria[A]);
+    const close = JSON.stringify(questions[Q.skill].criteria[A]);
     expect(close.length).toBeGreaterThan(wide.length);
   });
 });
@@ -134,8 +156,8 @@ describe("answer types are derived from the catalogue", () => {
   });
 
   it("gives every tool Noul a probability and no confidence", () => {
-    expectTypeOf<RouterAnswers["tool::Bash"]["noul"]>().toEqualTypeOf<number>();
-    expectTypeOf<RouterAnswers["tool::Bash"]>().not.toHaveProperty("confidence");
+    expectTypeOf<RouterAnswers[`tool::${ToolId}`]["noul"]>().toEqualTypeOf<number>();
+    expectTypeOf<RouterAnswers[`tool::${ToolId}`]>().not.toHaveProperty("confidence");
   });
 
   it("gives Choice and Score a confidence", () => {

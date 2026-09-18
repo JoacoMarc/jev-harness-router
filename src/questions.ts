@@ -273,19 +273,29 @@ export type RerankQuestions = {
 
 export type RerankAnswers = SystemOneResult<RerankQuestions>["answers"];
 
-/** The fuller description a finalist earns on the second pass. */
-function detailed(id: SkillId): string {
+/**
+ * Everything the wide pass showed, plus `detail`, which it did not.
+ *
+ * The extra field is the entire justification for a second round trip. When a card has
+ * no `detail` the finalist is re-read against exactly what ranked it, and the hop is
+ * wasted — `rerankAddsEvidence` below is what stops that being invisible.
+ */
+function detailed(id: SkillId): Record<string, Description> {
   const card = SKILLS[id];
-  const notFor = "notFor" in card ? ` Not for: ${card.notFor}` : "";
-  const examples =
-    "examples" in card && card.examples
-      ? ` Requests like: ${card.examples.map((e) => `"${e}"`).join("; ")}.`
-      : "";
-  return `${card.description}${notFor}${examples}`;
+  const entry: Record<string, Description> = { what: card.description };
+  if ("notFor" in card && card.notFor) entry.not_for = card.notFor;
+  if ("examples" in card && card.examples) entry.examples = [...card.examples];
+  if ("detail" in card && card.detail) entry.detail = card.detail;
+  return entry;
+}
+
+/** True when the shortlist has something the ranking pass did not already show. */
+export function rerankAddsEvidence(names: readonly SkillId[]): boolean {
+  return names.some((id) => "detail" in SKILLS[id] && Boolean(SKILLS[id].detail));
 }
 
 export function buildRerankQuestions(names: readonly SkillId[]): RerankQuestions {
-  const criteria: Record<string, string> = {};
+  const criteria: Record<string, Description> = {};
   for (const id of names) criteria[id] = detailed(id);
   criteria[NO_SKILL] = NO_SKILL_DESCRIPTION;
 

@@ -1,13 +1,14 @@
 import {
   EFFORTS,
-  MODELS,
   NO_SKILL,
   TOOLS,
   isSkillId,
   isToolId,
   maxEffort,
   maxTier,
+  modelFor,
   thresholdFor,
+  tierAt,
   TIERS,
   type Effort,
   type SkillId,
@@ -53,8 +54,13 @@ export interface Thresholds {
   readonly tierCuts: readonly number[];
   /** Difficulty expectation at or above which effort steps up. Length must be EFFORTS-1. */
   readonly effortCuts: readonly number[];
-  /** Scope expectation at or above which the tier is floored at `balanced`. */
+  /** Scope expectation at or above which the tier is floored at `scopeFloorTier`. */
   readonly scopeFloor: number;
+  /**
+   * Index into `TIERS` that a broad-scope turn is floored at. An index rather than a
+   * name, so a catalogue with two tiers or five needs no edit here.
+   */
+  readonly scopeFloorTier: number;
   /** Multiplies every per-risk tool bar at once, so the whole set can be swept as one knob. */
   readonly toolScale: number;
 }
@@ -96,6 +102,7 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   tierCuts: [2.0, 2.8],
   effortCuts: [0.8, 1.8, 2.6],
   scopeFloor: 1.5,
+  scopeFloorTier: 1,
   toolScale: 1,
 };
 
@@ -179,8 +186,9 @@ export function decide(
   why.push(`difficulty ${difficulty.score.toFixed(2)} -> ${tier}/${effort}`);
 
   if (scope.score >= thresholds.scopeFloor) {
-    const floored = maxTier(tier, "balanced");
-    if (floored !== tier) why.push(`scope ${scope.score.toFixed(2)} floors tier at balanced`);
+    const floor = tierAt(thresholds.scopeFloorTier);
+    const floored = maxTier(tier, floor);
+    if (floored !== tier) why.push(`scope ${scope.score.toFixed(2)} floors tier at ${floor}`);
     tier = floored;
   }
 
@@ -188,7 +196,7 @@ export function decide(
   // hard the turn is, the cost of a needlessly big model is visible and bounded; the
   // cost of a needlessly small one is a silently worse answer.
   if (difficulty.confidence < thresholds.escalateConfidence) {
-    const up = TIERS[Math.min(TIERS.indexOf(tier) + 1, TIERS.length - 1)] as Tier;
+    const up = tierAt(TIERS.indexOf(tier) + 1);
     const upEffort = EFFORTS[Math.min(EFFORTS.indexOf(effort) + 1, EFFORTS.length - 1)] as Effort;
     if (up !== tier || upEffort !== effort) {
       why.push(`difficulty confidence ${difficulty.confidence.toFixed(2)} is low, escalating`);
@@ -255,7 +263,7 @@ export function decide(
 
   return {
     tier,
-    model: MODELS[tier].id,
+    model: modelFor(tier).id,
     effort,
     tools,
     skill,

@@ -26,7 +26,30 @@ export const DEFAULT_MODEL = process.env.TYPESAFE_DEFAULT_MODEL ?? "jev-1.13.0";
  * falling back is expensive — skill accuracy drops from 90.7% to the heuristic's 81.5%,
  * and under-provisioned model tiers go from 7.4% to 31.5%.
  */
-export const DEFAULT_DEADLINE_MS = 600;
+export const DEADLINE_ENV = "HARNESS_ROUTER_DEADLINE_MS";
+
+/** The shipped fallback, used when nothing has been calibrated. */
+export const FALLBACK_DEADLINE_MS = 600;
+
+/**
+ * Read once at import, from `HARNESS_ROUTER_DEADLINE_MS` if it is set.
+ *
+ * `npm run calibrate` measures the round trip from wherever you actually are and writes
+ * that variable into `.env`. The shipped 600 was fitted to one machine in Buenos Aires,
+ * where a bare TCP connect to the API is 217ms; from somewhere closer it is pessimistic
+ * and from somewhere further it is optimistic. Neither is a number to inherit.
+ */
+/**
+ * Read at call time, never at import.
+ *
+ * ESM hoists every `import` above the module body, so a constant computed here would be
+ * fixed before a CLI's `loadEnv()` ever ran — which is exactly the bug that made
+ * `npm run calibrate` write a value the bench then ignored.
+ */
+export function defaultDeadlineMs(): number {
+  const raw = Number(process.env[DEADLINE_ENV]);
+  return Number.isFinite(raw) && raw > 0 ? raw : FALLBACK_DEADLINE_MS;
+}
 
 export class MissingKeyError extends Error {
   constructor() {
@@ -77,7 +100,7 @@ export class Jev {
   constructor(private readonly options: JevOptions = {}) {}
 
   get deadlineMs(): number {
-    return this.options.deadlineMs ?? DEFAULT_DEADLINE_MS;
+    return this.options.deadlineMs ?? defaultDeadlineMs();
   }
 
   /** How long an abandoned request is allowed to keep running before the SDK gives up. */

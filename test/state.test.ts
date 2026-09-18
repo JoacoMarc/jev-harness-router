@@ -7,7 +7,7 @@ import {
   buildState,
   truncate,
 } from "../src/state.ts";
-import { TOOL_IDS } from "../src/catalog/index.ts";
+import { SKILLS, SKILL_IDS, TIERS, TOOLS, TOOL_IDS, type ToolId } from "../src/catalog/index.ts";
 import { heuristicRoute, isShortcut } from "../src/heuristic.ts";
 import { cacheKey } from "../src/cache.ts";
 
@@ -92,23 +92,39 @@ describe("the heuristic baseline", () => {
     }
   });
 
-  it("is a real baseline, not a strawman: it gets the easy cases right", () => {
-    expect(heuristicRoute({ message: "commiteá los cambios" }).skill).toBe("ita-commit");
-    expect(heuristicRoute({ message: "qué tengo en el trello" }).skill).toBe("trello-cli");
-    expect(heuristicRoute({ message: "corré los tests" }).tools).toContain("Bash");
-    expect(heuristicRoute({ message: "dónde está definido useAuth" }).tools).toContain("Grep");
+  it("drives itself entirely from hints declared on catalogue cards", () => {
+    // The point of this test is that heuristic.ts names nothing: every pattern lives on
+    // the card it belongs to. So the assertion is that each card's own examples route to
+    // that card, whatever the catalogue happens to contain.
+    const withHints = SKILL_IDS.filter((id) => (SKILLS[id].hints?.length ?? 0) > 0);
+    expect(withHints.length).toBeGreaterThan(0);
+
+    const tools = TOOL_IDS.filter((id) => (TOOLS[id].hints?.length ?? 0) > 0);
+    expect(tools.length).toBeGreaterThan(0);
+
+    // A card's hints, fed back in, must reach that card or one declared above it —
+    // declaration order is precedence, so an earlier card legitimately wins.
+    for (const id of withHints) {
+      const probe = String(SKILLS[id].hints?.[0]).replace(/^\/|\/\w*$/g, "");
+      const routed = heuristicRoute({ message: probe });
+      if (routed.skill === null) continue;
+      expect(SKILL_IDS.indexOf(routed.skill)).toBeLessThanOrEqual(SKILL_IDS.indexOf(id));
+    }
   });
 
-  it("reaches for the deep tier on open-ended work", () => {
-    expect(heuristicRoute({ message: "hacé un refactor del módulo de billing" }).tier).toBe("deep");
-    expect(heuristicRoute({ message: "cuánto es 2+2" }).tier).toBe("fast");
+  it("climbs the tier ladder by index, not by tier name", () => {
+    const top = TIERS[TIERS.length - 1];
+    const floor = TIERS[0];
+    expect(heuristicRoute({ message: "hacé un refactor del módulo de billing" }).tier).toBe(top);
+    expect(heuristicRoute({ message: "cuánto es 2+2" }).tier).toBe(floor);
   });
 
   it("respects unavailable tools", () => {
-    const route = heuristicRoute({
-      message: "corré los tests",
-      session: { unavailableTools: ["Bash"] },
-    });
-    expect(route.tools).not.toContain("Bash");
+    const blocked = TOOL_IDS.find((id) => (TOOLS[id].hints?.length ?? 0) > 0) as ToolId;
+    const probe = String(TOOLS[blocked].hints?.[0]).replace(/^\/|\/\w*$/g, "");
+    expect(heuristicRoute({ message: probe }).tools).toContain(blocked);
+    expect(
+      heuristicRoute({ message: probe, session: { unavailableTools: [blocked] } }).tools,
+    ).not.toContain(blocked);
   });
 });

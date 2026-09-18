@@ -29,6 +29,17 @@ export function transport(): { fetch?: Fetch } {
 }
 
 /**
+ * Samples discarded before a timing run is recorded.
+ *
+ * Measured on a fresh process: request 1 takes ~885ms, request 2 ~912ms, and only from
+ * request 3 does it settle at ~350ms. `prewarm()` covers two of those, and a handful
+ * more of margin keeps the ramp out of a percentile it would otherwise dominate. Every
+ * command that discards samples says so in its output — a warm-up window you do not
+ * mention is just a nicer-looking number.
+ */
+export const WARMUP_SAMPLES = 5;
+
+/**
  * Runs tasks with a concurrency limit, preserving input order.
  *
  * Bounded on purpose: the rate limit is 1,200 requests a minute, and a fixture sweep

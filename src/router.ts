@@ -3,7 +3,7 @@ import type { Fetch } from "@typesafe-ai/sdk";
 import { Lru, cacheKey } from "./cache.ts";
 import type { ToolId } from "./catalog/index.ts";
 import { heuristicRoute, isShortcut, shortcutRoute } from "./heuristic.ts";
-import { DEFAULT_DEADLINE_MS, Jev, JevError } from "./jev.ts";
+import { Jev, JevError, defaultDeadlineMs } from "./jev.ts";
 import {
   DEFAULT_THRESHOLDS,
   applyRerank,
@@ -12,7 +12,7 @@ import {
   type PolicyResult,
   type Thresholds,
 } from "./policy.ts";
-import { buildQuestions, buildRerankQuestions } from "./questions.ts";
+import { buildQuestions, buildRerankQuestions, rerankAddsEvidence } from "./questions.ts";
 import { availableTools, buildState } from "./state.ts";
 import type { RouteDecision, Telemetry, TurnInput } from "./types.ts";
 
@@ -48,7 +48,7 @@ export class Router {
 
   constructor(private readonly options: RouterOptions = {}) {
     this.jev = new Jev({
-      deadlineMs: options.deadlineMs ?? DEFAULT_DEADLINE_MS,
+      ...(options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}),
       ...(options.model ? { model: options.model } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });
@@ -57,7 +57,7 @@ export class Router {
   }
 
   get deadlineMs(): number {
-    return this.options.deadlineMs ?? DEFAULT_DEADLINE_MS;
+    return this.options.deadlineMs ?? defaultDeadlineMs();
   }
 
   clearCache(): void {
@@ -138,7 +138,8 @@ export class Router {
       remaining >= MIN_RERANK_MS
     ) {
       const names = topSkills(first.answers, this.thresholds.shortlist);
-      if (names.length > 0) {
+      // A second call that re-reads the same criteria is a round trip spent on nothing.
+      if (names.length > 0 && rerankAddsEvidence(names)) {
         try {
           const second = await new Jev({
             deadlineMs: Math.floor(remaining),
