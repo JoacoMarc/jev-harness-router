@@ -8,6 +8,7 @@ export * from "./models.ts";
 export * from "./skills.ts";
 export * from "./tools.ts";
 export * from "./shortcuts.ts";
+export * from "./provider.ts";
 
 /**
  * A fingerprint of every catalogue entry that reaches the model.

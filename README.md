@@ -28,10 +28,11 @@ route.source;  // "jev" | "cache" | "shortcut" | "fallback"
 
 ```bash
 npm install
-cp .env.example .env     # then put your key in it
+cp .env.example .env     # TYPESAFE_API_KEY, and a provider key for `chat`
 npm run calibrate        # measure your network, write your deadline
 
-npx tsx bin/route.ts     # interactive: type turns, watch them route
+npm run route            # decide only: type turns, watch them route
+npm run chat             # decide and run: the routed turn goes to the routed model
 ```
 
 Interactive mode warms the connection once instead of once per turn, which is the shape
@@ -219,10 +220,53 @@ npm run eval -- --dump fixtures/answers.json    # keep the raw answers
 npm run eval -- --replay fixtures/answers.json  # re-sweep offline, zero API calls
 npm run eval -- --strings                       # A/B back to plain string criteria
 npm run bench            # percentiles, batching ablation, deadline curve
+npm run chat             # route a turn, then run it on the routed model
+npm run chat -- "<turn>" # one-shot
 ```
 
 Re-run the sweep on your own traffic before trusting `DEFAULT_THRESHOLDS`. Fifty-four
 turns is a small sample and the labels are one person's judgement.
+
+## Running the routed turn
+
+`npm run route` prints a decision. `npm run chat` acts on it: the turn goes to the model
+the router chose, at the effort it chose, with the skill it chose appended after the
+cached prefix — and you see the reply, what it cost, and how much of the prompt the
+provider served from cache.
+
+The provider is configuration, not code. `src/catalog/provider.ts` ships Anthropic and
+carries commented blocks for the rest:
+
+```ts
+export const PROVIDER = {
+  kind: "openai",                          // "anthropic" | "openai"
+  baseURL: "https://api.groq.com/openai",  // or omit for the vendor's own
+  apiKeyEnv: "GROQ_API_KEY",               // the variable, never the key
+  effortParams: (effort) => ({ reasoning_effort: effort === "low" ? "low" : "high" }),
+} as const satisfies ProviderConfig;
+```
+
+Two wire formats reach almost everything. `kind: "openai"` plus a `baseURL` covers Groq,
+Together, OpenRouter, DeepSeek, Mistral, vLLM, LM Studio and Ollama, because they all
+speak the same chat-completions shape. Put the matching model ids in `models.ts` and
+nothing else changes — the router decides a *tier*, and the catalogue decides what that
+tier means.
+
+`effortParams` is where the router's effort decision becomes vendor-specific: a thinking
+budget on Anthropic, a named reasoning effort on OpenAI, nothing at all on most local
+endpoints. Returning `{}` is a fine answer — the routed model still changes, which is
+most of the win.
+
+### What it deliberately does not do
+
+**It does not execute tools.** The router decides which tools a turn should have, and
+`chat` hands that decision to the model as context. Turning it into tool definitions and
+an execute loop, with whatever sandboxing that needs, is the harness's job. An example
+that ran model-chosen shell commands on your machine would be a bad thing to ship, and
+`Bash` is in the default catalogue.
+
+So `chat` demonstrates three of the four decisions for real — model, effort, skill — and
+reports the fourth. That is the honest boundary between a router and an agent.
 
 ## Making it yours
 
@@ -246,6 +290,7 @@ delete a tool and the compiler finds every reference; add a skill and
 | `src/catalog/tools.ts` | the tools your harness can offer, each with a risk class that sets its enable threshold |
 | `src/catalog/skills.ts` | your skills, **ordered specific before general** — that order is the heuristic's precedence |
 | `src/catalog/shortcuts.ts` | the bare acknowledgements in your users' language, and your command prefix |
+| `src/catalog/provider.ts` | where routed turns run: provider, base URL, key variable, effort mapping |
 
 Every card can carry `hints`: regexes used **only** by the offline heuristic, which is
 both the fallback and the baseline the eval scores against. Jev never sees them — it
@@ -293,7 +338,9 @@ src/heuristic.ts   the fallback, and the eval baseline
 src/jev.ts         the only module that talks to TypeSafe
 src/router.ts      shortcut -> cache -> jev(deadline) -> policy
 src/prompt.ts      the block that goes after your cached prefix
+src/provider.ts    the only module that talks to the model provider
 bin/calibrate.ts   measures your round trip, writes your deadline
+bin/chat.ts        routes a turn, then runs it on the routed model
 ```
 
 ## Things worth knowing before you tune it

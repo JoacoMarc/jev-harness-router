@@ -33,6 +33,15 @@ export {
 } from "./jev.ts";
 
 export * from "./catalog/index.ts";
+
+export {
+  complete,
+  hasProviderKey,
+  providerKey,
+  ProviderError,
+  MissingProviderKeyError,
+} from "./provider.ts";
+export type { CompleteRequest, FetchLike, Message, Reply } from "./provider.ts";
 export type {
   RouteDecision,
   DecisionSource,

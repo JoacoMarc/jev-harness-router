@@ -8,6 +8,7 @@
   },
   "scripts": {
     "route": "tsx bin/route.ts",
+    "chat": "tsx bin/chat.ts",
     "calibrate": "tsx bin/calibrate.ts",
     "eval": "tsx bin/eval.ts",
     "bench": "tsx bin/bench.ts",
