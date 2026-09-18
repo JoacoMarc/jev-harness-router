@@ -1,0 +1,58 @@
+// Labelled turns. One JSON object per line; `//` lines are ignored.
+// `expect` holds only what a careful person would insist on — the tier that turn deserves,
+// the tools it cannot be done without, and the skill that applies (null for none).
+// Anything left out of `expect` is not scored.
+{"id":"chat-01","message":"buenas, todo bien?","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"chat-02","message":"gracias, quedó perfecto","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"explain-01","message":"explicame qué es una mónada","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"explain-02","message":"cuál es la diferencia entre un left join y un inner join","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"explain-03","message":"what does the `satisfies` keyword do in TypeScript?","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"explain-04","message":"conviene usar Postgres o Mongo para guardar eventos? dame los pros y contras","expect":{"tier":"deep","tools":[],"skill":null}}
+{"id":"locate-01","message":"dónde está definido el middleware de auth?","expect":{"tier":"fast","tools":["Grep"],"skill":null}}
+{"id":"locate-02","message":"qué archivos tocan la tabla de usuarios?","expect":{"tier":"balanced","tools":["Grep"],"skill":null}}
+{"id":"locate-03","message":"show me src/router.ts","expect":{"tier":"fast","tools":["Read"],"skill":null}}
+{"id":"edit-01","message":"cambiá el timeout de 5s a 30s en src/client.ts","expect":{"tier":"fast","tools":["Read","Edit"],"skill":null}}
+{"id":"edit-02","message":"renombrá la función handleClick a onSubmit en el componente de login","expect":{"tier":"fast","tools":["Edit"],"skill":null}}
+{"id":"edit-03","message":"agregá un campo `deletedAt` opcional al modelo de Order","expect":{"tier":"balanced","tools":["Read","Edit"],"skill":null}}
+{"id":"feature-01","message":"implementá paginación en el endpoint de listado de productos, con cursor","expect":{"tier":"balanced","tools":["Read","Edit"],"skill":null}}
+{"id":"feature-02","message":"agregá rate limiting al API gateway, 100 req/min por API key","expect":{"tier":"balanced","tools":["Read","Edit"],"skill":null}}
+{"id":"feature-03","message":"necesito un endpoint nuevo para exportar las facturas del mes en CSV","expect":{"tier":"balanced","tools":["Write","Edit"],"skill":null}}
+{"id":"debug-01","message":"esto rompe desde el último deploy, TypeError: cannot read properties of undefined en el login","expect":{"tier":"balanced","tools":["Grep","Read"],"skill":"debug"}}
+{"id":"debug-02","message":"los tests pasan local pero fallan en CI, no entiendo por qué","expect":{"tier":"balanced","tools":["Bash","Read"],"skill":"debug"}}
+{"id":"debug-03","message":"el endpoint devuelve 500 cuando el body viene vacío","expect":{"tier":"balanced","tools":["Read","Grep"],"skill":"debug"}}
+{"id":"test-01","message":"corré los tests","expect":{"tier":"fast","tools":["Bash"],"skill":null}}
+{"id":"test-02","message":"escribí tests para el módulo de pricing","expect":{"tier":"balanced","tools":["Read","Write"],"skill":null}}
+{"id":"test-03","message":"qué deberíamos estar testeando en el flujo de checkout? armá el plan","expect":{"tier":"balanced","tools":[],"skill":"testing-strategy"}}
+{"id":"deep-01","message":"hacé un refactor del módulo de billing, está todo acoplado al proveedor de pagos","expect":{"tier":"deep","tools":["Read","Grep","Edit"],"skill":null}}
+{"id":"deep-02","message":"cómo estructurarías el sistema de notificaciones? push, mail y en app, con reintentos","expect":{"tier":"deep","tools":[],"skill":"system-design"}}
+{"id":"deep-03","message":"escribí el ADR de por qué elegimos Kafka sobre SQS","expect":{"tier":"deep","tools":[],"skill":"architecture"}}
+{"id":"deep-04","message":"migrar de REST a GraphQL nos conviene? qué implicaría para el frontend","expect":{"tier":"deep","tools":[],"skill":null}}
+{"id":"deep-05","message":"revisá todo el repo y decime qué deberíamos refactorizar primero","expect":{"tier":"deep","tools":["Task"],"skill":"tech-debt"}}
+{"id":"git-01","message":"commiteá los cambios","expect":{"tier":"fast","tools":["Bash"],"skill":"ita-commit"}}
+{"id":"git-02","message":"abrí el PR con lo que hicimos","expect":{"tier":"balanced","tools":["Bash"],"skill":"ita-create-pr"}}
+{"id":"git-03","message":"revisá el código de este branch antes de que lo mergee","expect":{"tier":"balanced","tools":["Bash","Read"],"skill":"ita-review-code"}}
+{"id":"git-04","message":"mirá si hay algún problema de seguridad en los cambios de esta rama","expect":{"tier":"balanced","tools":["Bash","Read"],"skill":"security-review"}}
+{"id":"trello-01","message":"qué tengo pendiente en el Trello?","expect":{"tier":"fast","tools":["Bash"],"skill":"trello-cli"}}
+{"id":"trello-02","message":"mové la card de login a En Progreso","expect":{"tier":"fast","tools":["Bash"],"skill":"trello-cli"}}
+{"id":"trello-03","message":"pasá este word a cards del Trello, tiene los items numerados","expect":{"tier":"balanced","tools":["Bash"],"skill":"docx-to-trello"}}
+{"id":"docs-01","message":"escribí el README de este proyecto","expect":{"tier":"balanced","tools":["Read","Write"],"skill":"documentation"}}
+{"id":"docs-02","message":"armá la propuesta comercial con la plantilla de LTM","expect":{"tier":"balanced","tools":[],"skill":"ltmsoft-doc-create"}}
+{"id":"docs-03","message":"armá un word con el resumen de la reunión","expect":{"tier":"fast","tools":[],"skill":"docx"}}
+{"id":"docs-04","message":"pasá estos datos a una planilla de Excel","expect":{"tier":"fast","tools":[],"skill":"xlsx"}}
+{"id":"docs-05","message":"armá las slides para la demo del viernes","expect":{"tier":"balanced","tools":[],"skill":"pptx"}}
+{"id":"docs-06","message":"juntá estos tres PDFs en uno solo","expect":{"tier":"fast","tools":[],"skill":"pdf"}}
+{"id":"ops-01","message":"producción está caída, el checkout tira 502","expect":{"tier":"deep","tools":["Bash"],"skill":"incident-response"}}
+{"id":"ops-02","message":"vamos a deployar la 2.4, chequeá que esté todo listo","expect":{"tier":"balanced","tools":["Bash"],"skill":"deploy-checklist"}}
+{"id":"ops-03","message":"armá mi update para el daily de mañana","expect":{"tier":"fast","tools":["Bash"],"skill":"standup"}}
+{"id":"meta-01","message":"guardá esa convención de naming en el CLAUDE.md","expect":{"tier":"fast","tools":["Edit"],"skill":"save-conventions"}}
+{"id":"meta-02","message":"levantá la app y sacame un screenshot de la pantalla nueva","expect":{"tier":"balanced","tools":["Bash"],"skill":"run"}}
+{"id":"web-01","message":"leé https://docs.typesafe.ai/primitives y decime qué primitivos hay","expect":{"tier":"fast","tools":["WebFetch"],"skill":null}}
+{"id":"web-02","message":"cuál es la última versión estable de Vitest?","expect":{"tier":"fast","tools":["WebSearch"],"skill":null}}
+{"id":"nomatch-01","message":"publicá este anuncio en mi cuenta de Mastodon","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"nomatch-02","message":"reservame una mesa para cuatro el sábado","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"ambiguous-01","message":"arreglá eso","expect":{"tier":"balanced","skill":null}}
+{"id":"ambiguous-02","message":"no me gusta cómo quedó, probá otra cosa","expect":{"tier":"balanced","skill":null}}
+{"id":"shortcut-01","message":"/commit","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"shortcut-02","message":"dale","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"shortcut-03","message":"ok","expect":{"tier":"fast","tools":[],"skill":null}}
+{"id":"shortcut-04","message":"seguí","expect":{"tier":"fast","tools":[],"skill":null}}
