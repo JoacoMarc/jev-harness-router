@@ -1,5 +1,11 @@
 import type { Fetch, Questions } from "@typesafe-ai/sdk";
-import { NO_SKILL, TIERS, isToolId, type ToolId } from "./catalog/index.ts";
+import {
+  DEFAULT_CATALOG,
+  NO_SKILL,
+  type Catalog,
+  type CatalogSpec,
+  type DefaultCatalogSpec,
+} from "./catalog/index.ts";
 import { heuristicRoute } from "./heuristic.ts";
 import { Q, gateId } from "./questions.ts";
 
@@ -28,15 +34,19 @@ function spread(labels: readonly string[], winner: string, mass: number): Record
   return out;
 }
 
-export function mockFetch(): Fetch {
+/** Answers from the heuristic over `catalog`, which must be the one the router asks with. */
+export function mockFetch<C extends CatalogSpec = DefaultCatalogSpec>(
+  catalog: Catalog<C> = DEFAULT_CATALOG as unknown as Catalog<C>,
+): Fetch {
   return async (_input, init) => {
     const body = JSON.parse(String(init?.body ?? "{}")) as {
       questions: Questions;
       state: { latest_user_message?: string; recent_context?: string };
     };
     const message = body.state.latest_user_message ?? "";
-    const guess = heuristicRoute({ message, recentContext: body.state.recent_context ?? "" });
+    const guess = heuristicRoute({ message, recentContext: body.state.recent_context ?? "" }, catalog);
     const selected = new Set<string>(guess.tools);
+    const tierIndex = catalog.tierIndex(guess.tier);
 
     await new Promise((resolve) =>
       setTimeout(resolve, MOCK_LATENCY_MS + Math.floor(Math.random() * 60)),
@@ -58,8 +68,15 @@ export function mockFetch(): Fetch {
         continue;
       }
       if (question.type === "score") {
-        const score = id === Q.scope ? Math.min(TIERS.indexOf(guess.tier), 2) : TIERS.indexOf(guess.tier) * 1.3;
-        answers[id] = { type: "score", score, confidence: 0.82, legend: {}, probabilities: {} };
+        const score = id === Q.scope ? Math.min(tierIndex, 2) : tierIndex * 1.3;
+        // Policy reads the distribution, not the expectation, so give it one.
+        answers[id] = {
+          type: "score",
+          score,
+          confidence: 0.82,
+          legend: {},
+          probabilities: { [String(Math.round(score))]: 1 },
+        };
         continue;
       }
 
@@ -67,8 +84,8 @@ export function mockFetch(): Fetch {
       let winner = labels.includes(NO_SKILL) ? NO_SKILL : (labels[0] as string);
       if (id === Q.skill && guess.skill && labels.includes(guess.skill)) winner = guess.skill;
       if (id === Q.toolWhich) {
-        const first = guess.tools.find((t: ToolId) => labels.includes(t));
-        if (first && isToolId(first)) winner = first;
+        const first = guess.tools.find((t) => labels.includes(t));
+        if (first) winner = first;
       }
       if (id === Q.intent) winner = selected.has("Edit") || selected.has("Write") ? "modify" : "explain";
       answers[id] = {

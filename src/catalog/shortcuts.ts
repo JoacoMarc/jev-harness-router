@@ -1,9 +1,10 @@
 /**
  * Turns that need no model call at all.
  *
- * ── Edit this file to make the router yours. ─────────────────────────────────
+ * ── The shipped default. ─────────────────────────────────────────────────────
  * These are language- and harness-specific. The list below covers Spanish and
- * English; add your own, or empty it if your harness never sees bare
+ * English. As a dependency, pass your own under `shortcuts` in `defineCatalog`;
+ * in a clone, edit it here. Empty it if your harness never sees bare
  * acknowledgements.
  * ─────────────────────────────────────────────────────────────────────────────
  *

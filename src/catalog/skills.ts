@@ -1,9 +1,10 @@
 /**
  * The skill catalogue.
  *
- * ── Edit this file to make the router yours. ─────────────────────────────────
- * Replace these with your own skills. `SkillId` and `route.skill` derive from the
- * keys, so nothing else needs touching.
+ * ── The shipped default. ─────────────────────────────────────────────────────
+ * Using the package as a dependency? Pass your own to `createRouter({ catalog })`
+ * via `defineCatalog` and leave this file alone. Cloned the repo? Edit it here.
+ * `SkillId` and `route.skill` derive from the keys.
  *
  * **Declaration order is the heuristic's precedence.** Jev does not care — a
  * Choice's criteria is a map — but the offline fallback takes the first card
@@ -23,29 +24,7 @@
  * them, and this request runs on every turn, so it earns its tokens or it stays off.
  */
 
-export interface SkillCard {
-  readonly description: string;
-  readonly notFor?: string;
-  readonly examples?: readonly string[];
-  /**
-   * The longer text, sent **only on the second hop**.
-   *
-   * This is what makes a rerank worth its round trip: the wide pass ranks every skill on
-   * one line each, and the finalists are then re-read against something the ranking never
-   * saw. Without it the second call re-reads identical criteria and buys nothing, which
-   * is exactly what happened here once structured criteria became the default for the
-   * first pass. Paste a paragraph of the skill's own documentation.
-   */
-  readonly detail?: string;
-  /**
-   * Patterns for the offline heuristic only — the fallback when Jev misses the deadline,
-   * and the baseline the eval scores against. Jev never sees them; it reads
-   * `description`, `notFor` and `examples`.
-   *
-   * Matched against diacritic-folded text, so write them unaccented.
-   */
-  readonly hints?: readonly RegExp[];
-}
+import type { SkillCard } from "./types.ts";
 
 export const SKILLS = {
   "docx-to-trello": {
@@ -207,15 +186,3 @@ export const SKILLS = {
     hints: [/\bpdf\b/i],
   },
 } as const satisfies Record<string, SkillCard>;
-
-export type SkillId = keyof typeof SKILLS;
-
-export const SKILL_IDS = Object.keys(SKILLS) as SkillId[];
-
-/** The no-match outcome. Not a skill: the absence of one. */
-export const NO_SKILL = "none";
-export type SkillChoice = SkillId | typeof NO_SKILL;
-
-export function isSkillId(value: string): value is SkillId {
-  return Object.hasOwn(SKILLS, value);
-}

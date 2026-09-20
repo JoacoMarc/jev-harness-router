@@ -14,16 +14,31 @@ call, in about 350 ms, behind a deadline it is not allowed to miss.
 | **skill** | one `Choice` over the catalogue, gated by four request-shape `Noul`s |
 
 ```ts
-import { createRouter, systemPromptParts } from "jev-harness-router";
+import { createRouter, defineCatalog } from "jev-harness-router";
 
-const router = createRouter();
+const catalog = defineCatalog({
+  models: [                                // cheapest first — the order is the ladder
+    { tier: "fast", id: "claude-haiku-4-5-20251001", label: "Haiku", use: "Lookups, one-file edits." },
+    { tier: "deep", id: "claude-opus-5",             label: "Opus",  use: "Design, cross-cutting work." },
+  ],
+  tools: {
+    Read: { description: "Open a file the user named.", risk: "read" },
+    Bash: { description: "Run a shell command.",        risk: "execute" },
+  },
+  skills: {
+    debug: { description: "Work backwards from an error to its root cause." },
+  },
+});
+
+const router = createRouter({ catalog });
 await router.prewarm();                    // once, at startup
 
 const route = await router.route({ message: "arreglá el bug de auth en el login" });
 
-route.model;   // "claude-sonnet-5"
-route.effort;  // "medium"
-route.tools;   // ["Read", "Grep", "Edit"]
+route.tier;    // "fast" | "deep"          — your names, not ours
+route.model;   // "claude-opus-5"
+route.effort;  // "low" | "medium" | "high" | "xhigh"
+route.tools;   // ("Read" | "Bash")[]
 route.skill;   // "debug" | null
 route.source;  // "jev" | "cache" | "shortcut" | "fallback"
 ```
@@ -35,6 +50,24 @@ Full numbers and how they were measured are [below](#what-it-actually-does).
 ---
 
 ## Quick start
+
+### As a dependency
+
+```bash
+npm install jev-harness-router
+export TYPESAFE_API_KEY=…             # https://console.typesafe.ai/settings/keys
+```
+
+Describe your harness with `defineCatalog` as above and hand it to `createRouter`. The
+router is the only thing that needs the key; running the routed turn is your harness's
+job, on whatever provider it already talks to. `createRouter()` with no catalogue runs on
+the shipped example — fine to try it, wrong to ship.
+
+Set `HARNESS_ROUTER_DEADLINE_MS` in the environment to the value `npm run calibrate`
+gives you from a clone, or pass `deadlineMs` explicitly. The shipped 600 ms was fitted
+from one machine in Buenos Aires.
+
+### The repo: CLIs, eval, bench
 
 ```bash
 git clone https://github.com/JoacoMarc/jev-harness-router
@@ -68,12 +101,32 @@ MOCK=1 npm run route
 
 ## Configuration
 
-Everything that knows who you are lives in **`src/catalog/`**. Five files, all plain
-`as const` objects. No other file in the repo names a tool, a skill, a tier or a
-provider — that is checked, not claimed.
+Everything that knows who you are is a **catalogue**: three plain objects — models,
+tools, skills — plus an optional list of turns that need no model at all. Nothing else in
+the package names a tool, a skill or a tier; the tests run the whole router on a
+two-tier, two-tool catalogue in a different language to make sure of it.
 
-The types flow from these objects. Delete a tool and the compiler finds every reference.
-Add a skill and `route.skill` widens to include it, with no cast anywhere.
+The types flow from the catalogue. `defineCatalog({ ... })` keeps the literal names, so on
+a router built from it `route.tier` is a union of *your* tiers and `route.skill` of *your*
+skill ids, with no cast anywhere.
+
+```ts
+import { DEFAULT_THRESHOLDS, createRouter, defineCatalog } from "jev-harness-router";
+
+const catalog = defineCatalog({
+  models: [ /* 2. */ ],
+  tools:  { /* 3. */ },
+  skills: { /* 4. */ },
+  shortcuts: { commandPrefix: /^\//, continuations: ["ok", "dale"] },   // 5.
+});
+
+const router = createRouter({ catalog, thresholds: { ...DEFAULT_THRESHOLDS, tierCuts: [2] } });
+```
+
+**In a clone**, the same three objects live in `src/catalog/` — `models.ts`, `tools.ts`,
+`skills.ts`, `shortcuts.ts` — and `createRouter()` with no catalogue reads them. Edit
+those to point the CLIs, the eval and the bench at your own harness. The fifth file,
+`provider.ts`, is only consulted by `npm run chat`, which runs the turn.
 
 ### 1. Provider — where turns run
 
@@ -129,23 +182,25 @@ most of the win.
 
 ### 2. Models — the capability ladder
 
-`src/catalog/models.ts`
+`catalog.models` · in a clone, `src/catalog/models.ts`
 
 ```ts
-export const MODELS = [
+models: [
   { tier: "fast",     id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", use: "…", hints: [] },
   { tier: "balanced", id: "claude-sonnet-5",           label: "Sonnet 5",  use: "…", hints: [/…/] },
   { tier: "deep",     id: "claude-opus-5",             label: "Opus 5",    use: "…", hints: [/…/] },
-] as const satisfies readonly (ModelCard & { tier: string })[];
+],
 ```
 
 **Order is the ladder**, cheapest first — policy escalates by index, so an entry's
-position matters more than its name. Use two tiers or five; nothing is hardcoded to three.
-`id` is whatever your provider calls it; nothing parses it.
+position matters more than its name. Use two tiers or five; nothing is hardcoded to three,
+but `DEFAULT_THRESHOLDS.tierCuts` has two cuts for a three-rung ladder — pass your own
+with one cut per rung above the floor. `id` is whatever your provider calls it; nothing
+parses it.
 
 ### 3. Tools — what the harness can offer
 
-`src/catalog/tools.ts`
+`catalog.tools` · in a clone, `src/catalog/tools.ts`
 
 ```ts
 Bash: {
@@ -165,7 +220,7 @@ in the model's answer.
 
 ### 4. Skills — the playbooks
 
-`src/catalog/skills.ts`
+`catalog.skills` · in a clone, `src/catalog/skills.ts`
 
 ```ts
 "ita-commit": {
@@ -187,10 +242,11 @@ list rather than a shortlist.
 
 ### 5. Shortcuts — turns that need no model at all
 
-`src/catalog/shortcuts.ts`
+`catalog.shortcuts` · in a clone, `src/catalog/shortcuts.ts`
 
 Bare acknowledgements in your users' languages, and your command prefix. These route in
-**0 ms** with no call. Ships with Spanish and English.
+**0 ms** with no call. The default catalogue ships Spanish and English; a catalogue that
+declares none gets only the `/` command prefix.
 
 ### About `hints`
 
@@ -223,8 +279,9 @@ the time.
 
 ### Thresholds
 
-`DEFAULT_THRESHOLDS` in `src/policy.ts` is fitted to **these** fixtures on **this**
-network. `npm run eval` sweeps every one of them and prints the curves.
+`DEFAULT_THRESHOLDS` is fitted to **these** fixtures on **this** catalogue. Pass your own
+to `createRouter({ thresholds })`; `npm run eval` sweeps every one of them and prints the
+curves.
 
 ---
 
@@ -280,7 +337,7 @@ throw away what does not apply. Measured on this catalogue: one call with 20 que
 property of the turn — asking directly is two hops of indirection, a documented weak spot
 of `jev-1.13`. The router asks how hard the turn is and how much of the project it
 touches; `policy.ts` maps that onto a model. Swapping a model is an edit to one catalogue
-file.
+entry.
 
 **Choice and Noul answer different questions, so both are used.** A `Choice` is relative
 and always names a winner. A `Noul` is absolute and can come back low for everything. On
@@ -393,7 +450,7 @@ npm run eval -- --replay <dump>          # re-sweep offline, zero API calls
 npm run eval -- --strings                # A/B plain string skill criteria
 npm run bench                            # percentiles, batching ablation, deadline curve
 
-npm test                                 # 92 tests, no key, no network
+npm test                                 # 105 tests, no key, no network
 npm run typecheck
 npm run lint
 ```
@@ -406,17 +463,20 @@ overrides the calibrated one, `--cold` skips prewarming, `MOCK=1` runs everythin
 ## Layout
 
 ```
-src/catalog/       models, tools, skills, shortcuts, provider — the only files that know you
-src/state.ts       the compact object Jev evaluates, with its truncation budget
-src/questions.ts   every question, pure
-src/policy.ts      answers -> decision, pure
-src/heuristic.ts   the fallback, and the eval baseline
-src/jev.ts         the only module that talks to TypeSafe
-src/provider.ts    the only module that talks to the model provider
-src/router.ts      shortcut -> cache -> jev(deadline) -> policy
-src/prompt.ts      the block that goes after your cached prefix
-bin/calibrate.ts   measures your round trip, writes your deadline
-bin/chat.ts        routes a turn, then runs it
+src/catalog/types.ts     the card types, `defineCatalog` and the `Catalog` class
+src/catalog/default.ts   the shipped example catalogue: models, tools, skills, shortcuts
+src/catalog/provider.ts  where `npm run chat` runs the turn — the router never reads it
+src/state.ts             the compact object Jev evaluates, with its truncation budget
+src/questions.ts         every question, pure
+src/policy.ts            answers -> decision, pure
+src/heuristic.ts         the fallback, and the eval baseline
+src/jev.ts               the only module that talks to TypeSafe
+src/provider.ts          the only module that talks to the model provider
+src/router.ts            shortcut -> cache -> jev(deadline) -> policy
+src/prompt.ts            the block that goes after your cached prefix
+bin/calibrate.ts         measures your round trip, writes your deadline
+bin/chat.ts              routes a turn, then runs it
+test/catalog.test.ts     the whole router on a catalogue that is not the shipped one
 ```
 
 ---

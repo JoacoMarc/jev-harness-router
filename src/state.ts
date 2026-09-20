@@ -1,4 +1,10 @@
-import { TOOL_IDS, type ToolId } from "./catalog/index.ts";
+import {
+  DEFAULT_CATALOG,
+  type Catalog,
+  type CatalogSpec,
+  type DefaultCatalogSpec,
+  type ToolIdOf,
+} from "./catalog/index.ts";
 import type { TurnInput, TurnState } from "./types.ts";
 
 /**
@@ -26,9 +32,12 @@ export function truncate(text: string, max: number): string {
 }
 
 /** Tools the harness can actually offer this turn. The rest never reach the model. */
-export function availableTools(input: TurnInput): ToolId[] {
+export function availableTools<C extends CatalogSpec = DefaultCatalogSpec>(
+  input: TurnInput,
+  catalog: Catalog<C> = DEFAULT_CATALOG as unknown as Catalog<C>,
+): ToolIdOf<C>[] {
   const blocked = new Set(input.session?.unavailableTools ?? []);
-  return TOOL_IDS.filter((id) => !blocked.has(id));
+  return catalog.toolIds.filter((id) => !blocked.has(id));
 }
 
 /**

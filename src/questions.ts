@@ -7,16 +7,17 @@ import type {
   SystemOneResult,
 } from "@typesafe-ai/sdk";
 import {
+  DEFAULT_CATALOG,
   NO_SKILL,
-  SKILLS,
-  SKILL_IDS,
-  TOOLS,
-  type SkillId,
-  type ToolId,
+  type Catalog,
+  type CatalogSpec,
+  type DefaultCatalogSpec,
+  type SkillIdOf,
+  type ToolIdOf,
 } from "./catalog/index.ts";
 
 /**
- * Every question the router asks, built from the catalogues.
+ * Every question the router asks, built from a catalogue.
  *
  * Pure: no client, no network, no environment. `test/questions.test.ts` asserts the
  * shape of what goes on the wire without an API key.
@@ -25,6 +26,9 @@ import {
  * can slice answers by prefix instead of keeping a lookup table. The ids themselves are
  * never sent to the model — all the meaning has to live in `instructions`.
  */
+
+const fallbackCatalog = <C extends CatalogSpec>(): Catalog<C> =>
+  DEFAULT_CATALOG as unknown as Catalog<C>;
 
 // ---------------------------------------------------------------- ids
 
@@ -53,7 +57,7 @@ export const Q = {
 } as const;
 
 export const gateId = <T extends GateId>(id: T): `gate::${T}` => `gate::${id}`;
-export const toolId = <T extends ToolId>(id: T): `tool::${T}` => `tool::${id}`;
+export const toolId = <T extends string>(id: T): `tool::${T}` => `tool::${id}`;
 
 // ---------------------------------------------------------------- rubrics
 
@@ -117,8 +121,14 @@ export const GATE_QUESTIONS: Record<GateId, string> = {
 
 // ---------------------------------------------------------------- criteria maps
 
-export type SkillCriteria = Record<SkillId | typeof NO_SKILL, Description>;
-export type ToolCriteria = Record<ToolId | typeof NO_SKILL, string>;
+export type SkillCriteria<C extends CatalogSpec = DefaultCatalogSpec> = Record<
+  SkillIdOf<C> | typeof NO_SKILL,
+  Description
+>;
+export type ToolCriteria<C extends CatalogSpec = DefaultCatalogSpec> = Record<
+  ToolIdOf<C> | typeof NO_SKILL,
+  string
+>;
 
 const NO_SKILL_DESCRIPTION =
   "No skill in this catalogue does the specific thing the request asks for, so the assistant should handle the turn directly.";
@@ -142,45 +152,51 @@ function asPhrase(sentence: string): string {
  * way came out at p50 322ms for strings and 329ms for objects. That is the same result
  * the token probe gives: this request's latency is network, not payload.
  */
-export function skillCriteria(structured = true): SkillCriteria {
+export function skillCriteria<C extends CatalogSpec = DefaultCatalogSpec>(
+  structured = true,
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): SkillCriteria<C> {
   const out: Record<string, Description> = {};
-  for (const id of SKILL_IDS) {
-    const card = SKILLS[id];
-    const notFor = "notFor" in card ? card.notFor : undefined;
-    const examples = "examples" in card ? card.examples : undefined;
+  for (const id of catalog.skillIds) {
+    const card = catalog.skillCard(id);
     if (!structured) {
-      out[id] = notFor ? `${card.description} Not for: ${notFor}` : card.description;
+      out[id] = card.notFor ? `${card.description} Not for: ${card.notFor}` : card.description;
       continue;
     }
     const entry: Record<string, Description> = { what: card.description };
-    if (notFor) entry.not_for = notFor;
-    if (examples) entry.examples = [...examples];
+    if (card.notFor) entry.not_for = card.notFor;
+    if (card.examples) entry.examples = [...card.examples];
     out[id] = entry;
   }
   out[NO_SKILL] = structured ? { what: NO_SKILL_DESCRIPTION } : NO_SKILL_DESCRIPTION;
-  return out as SkillCriteria;
+  return out as SkillCriteria<C>;
 }
 
-export function toolCriteria(tools: readonly ToolId[]): ToolCriteria {
+export function toolCriteria<C extends CatalogSpec = DefaultCatalogSpec>(
+  tools: readonly ToolIdOf<C>[],
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): ToolCriteria<C> {
   const out: Record<string, string> = {};
-  for (const id of tools) out[id] = TOOLS[id].description;
+  for (const id of tools) out[id] = catalog.toolCard(id).description;
   out[NO_SKILL] = "The turn can be handled without reaching for any tool at all.";
-  return out as ToolCriteria;
+  return out as ToolCriteria<C>;
 }
 
 // ---------------------------------------------------------------- the question set
 
-export type RouterQuestions = {
+export type RouterQuestions<C extends CatalogSpec = DefaultCatalogSpec> = {
   [Q.difficulty]: ScoreQuestion<typeof DIFFICULTY_LEVELS>;
   [Q.scope]: ScoreQuestion<typeof SCOPE_LEVELS>;
   [Q.intent]: ChoiceQuestion<typeof INTENT_CRITERIA>;
-  [Q.skill]: ChoiceQuestion<SkillCriteria>;
-  [Q.toolWhich]: ChoiceQuestion<ToolCriteria>;
+  [Q.skill]: ChoiceQuestion<SkillCriteria<C>>;
+  [Q.toolWhich]: ChoiceQuestion<ToolCriteria<C>>;
 } & { [K in GateId as `gate::${K}`]: NoulQuestion } & {
-  [K in ToolId as `tool::${K}`]: NoulQuestion;
+  [K in ToolIdOf<C> as `tool::${K}`]: NoulQuestion;
 };
 
-export type RouterAnswers = SystemOneResult<RouterQuestions>["answers"];
+export type RouterAnswers<C extends CatalogSpec = DefaultCatalogSpec> = SystemOneResult<
+  RouterQuestions<C>
+>["answers"];
 
 export interface BuildOptions {
   /** Objects for skill options instead of strings. Defaults to true; measurably better. */
@@ -194,15 +210,16 @@ export interface BuildOptions {
  * question the policy may not read costs tokens but essentially no time. That is what
  * buys the whole four-way decision in a single round trip.
  *
- * The mapped types above promise a key for every `ToolId`; a caller that filters `tools`
+ * The mapped types above promise a key for every tool id; a caller that filters `tools`
  * gets fewer at runtime. That is the right upper bound for an answer — whatever comes
  * back is one of the tools that were offered — and `policy.ts` only ever reads the keys
  * it asked for.
  */
-export function buildQuestions(
-  tools: readonly ToolId[],
+export function buildQuestions<C extends CatalogSpec = DefaultCatalogSpec>(
+  tools: readonly ToolIdOf<C>[],
   options: BuildOptions = {},
-): RouterQuestions {
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): RouterQuestions<C> {
   const questions: Record<string, unknown> = {
     [Q.difficulty]: score(
       "How much work is it to fully handle `latest_user_message`, read together with `recent_context`?",
@@ -218,11 +235,11 @@ export function buildQuestions(
     ),
     [Q.skill]: choice(
       "Which of these skills, if any, is the right one to load to help with `latest_user_message`?",
-      skillCriteria(options.structuredSkillCriteria ?? true),
+      skillCriteria(options.structuredSkillCriteria ?? true, catalog),
     ),
     [Q.toolWhich]: choice(
       "Which single one of these capabilities is most central to handling `latest_user_message`?",
-      toolCriteria(tools),
+      toolCriteria(tools, catalog),
     ),
   };
 
@@ -230,7 +247,7 @@ export function buildQuestions(
 
   for (const id of tools) {
     questions[toolId(id)] = noul(
-      `To handle \`latest_user_message\`, will the assistant have to ${asPhrase(TOOLS[id].description)}?`,
+      `To handle \`latest_user_message\`, will the assistant have to ${asPhrase(catalog.toolCard(id).description)}?`,
       {
         true: "Completing the turn requires doing this.",
         false:
@@ -239,11 +256,11 @@ export function buildQuestions(
     );
   }
 
-  return questions as RouterQuestions;
+  return questions as RouterQuestions<C>;
 }
 
 /** Question count for a tool set, without building the request. Used by the bench. */
-export function questionCount(tools: readonly ToolId[]): number {
+export function questionCount(tools: readonly string[]): number {
   return 5 + GATE_IDS.length + tools.length;
 }
 
@@ -265,13 +282,15 @@ export function questionCount(tools: readonly ToolId[]): number {
 export const RERANK_INSTRUCTIONS =
   "Exactly one of these skills is the right one to load for `latest_user_message`. Which one? Read what each actually does, not just its name.";
 
-export const fitsId = <T extends SkillId>(id: T): `fits::${T}` => `fits::${id}`;
+export const fitsId = <T extends string>(id: T): `fits::${T}` => `fits::${id}`;
 
-export type RerankQuestions = {
-  [Q.skill]: ChoiceQuestion<Record<SkillId | typeof NO_SKILL, Description>>;
-} & { [K in SkillId as `fits::${K}`]: NoulQuestion };
+export type RerankQuestions<C extends CatalogSpec = DefaultCatalogSpec> = {
+  [Q.skill]: ChoiceQuestion<Record<SkillIdOf<C> | typeof NO_SKILL, Description>>;
+} & { [K in SkillIdOf<C> as `fits::${K}`]: NoulQuestion };
 
-export type RerankAnswers = SystemOneResult<RerankQuestions>["answers"];
+export type RerankAnswers<C extends CatalogSpec = DefaultCatalogSpec> = SystemOneResult<
+  RerankQuestions<C>
+>["answers"];
 
 /**
  * Everything the wide pass showed, plus `detail`, which it did not.
@@ -280,23 +299,29 @@ export type RerankAnswers = SystemOneResult<RerankQuestions>["answers"];
  * no `detail` the finalist is re-read against exactly what ranked it, and the hop is
  * wasted — `rerankAddsEvidence` below is what stops that being invisible.
  */
-function detailed(id: SkillId): Record<string, Description> {
-  const card = SKILLS[id];
+function detailed<C extends CatalogSpec>(id: SkillIdOf<C>, catalog: Catalog<C>): Record<string, Description> {
+  const card = catalog.skillCard(id);
   const entry: Record<string, Description> = { what: card.description };
-  if ("notFor" in card && card.notFor) entry.not_for = card.notFor;
-  if ("examples" in card && card.examples) entry.examples = [...card.examples];
-  if ("detail" in card && card.detail) entry.detail = card.detail;
+  if (card.notFor) entry.not_for = card.notFor;
+  if (card.examples) entry.examples = [...card.examples];
+  if (card.detail) entry.detail = card.detail;
   return entry;
 }
 
 /** True when the shortlist has something the ranking pass did not already show. */
-export function rerankAddsEvidence(names: readonly SkillId[]): boolean {
-  return names.some((id) => "detail" in SKILLS[id] && Boolean(SKILLS[id].detail));
+export function rerankAddsEvidence<C extends CatalogSpec = DefaultCatalogSpec>(
+  names: readonly SkillIdOf<C>[],
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): boolean {
+  return names.some((id) => Boolean(catalog.skillCard(id).detail));
 }
 
-export function buildRerankQuestions(names: readonly SkillId[]): RerankQuestions {
+export function buildRerankQuestions<C extends CatalogSpec = DefaultCatalogSpec>(
+  names: readonly SkillIdOf<C>[],
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): RerankQuestions<C> {
   const criteria: Record<string, Description> = {};
-  for (const id of names) criteria[id] = detailed(id);
+  for (const id of names) criteria[id] = detailed(id, catalog);
   criteria[NO_SKILL] = NO_SKILL_DESCRIPTION;
 
   const questions: Record<string, unknown> = {
@@ -304,8 +329,8 @@ export function buildRerankQuestions(names: readonly SkillId[]): RerankQuestions
   };
   for (const id of names) {
     questions[fitsId(id)] = noul(
-      `Does the skill "${id}" do the specific thing \`latest_user_message\` asks for? It is described as: ${SKILLS[id].description}`,
+      `Does the skill "${id}" do the specific thing \`latest_user_message\` asks for? It is described as: ${catalog.skillCard(id).description}`,
     );
   }
-  return questions as RerankQuestions;
+  return questions as RerankQuestions<C>;
 }

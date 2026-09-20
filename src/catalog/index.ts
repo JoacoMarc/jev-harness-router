@@ -1,23 +1,14 @@
-import { createHash } from "node:crypto";
-import { MODELS } from "./models.ts";
-import { SKILLS } from "./skills.ts";
-import { TOOLS } from "./tools.ts";
-import { CONTINUATIONS } from "./shortcuts.ts";
-
-export * from "./models.ts";
-export * from "./skills.ts";
-export * from "./tools.ts";
-export * from "./shortcuts.ts";
-export * from "./provider.ts";
-
 /**
- * A fingerprint of every catalogue entry that reaches the model.
+ * Everything a harness needs to describe itself to the router.
  *
- * It is part of the cache key: adding a tool or rewording a skill description changes
- * the questions, which changes the answers, so yesterday's cached decision is stale
- * even for a byte-identical turn.
+ * `defineCatalog` and the card types are the public surface. The `MODELS` / `TOOLS` /
+ * `SKILLS` objects and `DEFAULT_CATALOG` are the shipped example, exported so a clone
+ * can edit them in place and so the eval has a fixed target.
  */
-export const CATALOG_VERSION = createHash("sha256")
-  .update(JSON.stringify({ MODELS, TOOLS, SKILLS, shortcuts: [...CONTINUATIONS] }))
-  .digest("hex")
-  .slice(0, 12);
+export * from "./types.ts";
+export * from "./default.ts";
+export { MODELS } from "./models.ts";
+export { TOOLS } from "./tools.ts";
+export { SKILLS } from "./skills.ts";
+export { COMMAND_PREFIX, CONTINUATIONS } from "./shortcuts.ts";
+export * from "./provider.ts";

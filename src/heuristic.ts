@@ -1,19 +1,13 @@
 import {
-  COMMAND_PREFIX,
-  CONTINUATIONS,
+  DEFAULT_CATALOG,
   EFFORTS,
-  MODELS,
-  SKILLS,
-  SKILL_IDS,
-  TIERS,
-  TOOLS,
-  TOOL_IDS,
   effortAt,
-  modelFor,
-  tierAt,
-  type SkillId,
-  type Tier,
-  type ToolId,
+  type Catalog,
+  type CatalogSpec,
+  type DefaultCatalogSpec,
+  type SkillIdOf,
+  type TierOf,
+  type ToolIdOf,
 } from "./catalog/index.ts";
 import type { PolicyResult } from "./policy.ts";
 import type { TurnInput } from "./types.ts";
@@ -45,26 +39,36 @@ export function normalize(text: string): string {
 /** Message length past which a turn is treated as substantial regardless of wording. */
 export const LONG_MESSAGE_CHARS = 220;
 
+const fallbackCatalog = <C extends CatalogSpec>(): Catalog<C> =>
+  DEFAULT_CATALOG as unknown as Catalog<C>;
+
 /** True when this turn is trivially classifiable and needs no model call at all. */
-export function isShortcut(input: TurnInput): boolean {
+export function isShortcut<C extends CatalogSpec = DefaultCatalogSpec>(
+  input: TurnInput,
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): boolean {
   const text = input.message.trim();
   if (text.length === 0) return true;
-  if (COMMAND_PREFIX.test(text)) return true;
+  if (catalog.commandPrefix.test(text)) return true;
   const bare = text.toLowerCase().replace(/[.!¡]+$/, "");
-  return CONTINUATIONS.has(bare) || CONTINUATIONS.has(normalize(bare));
+  return catalog.continuations.has(bare) || catalog.continuations.has(normalize(bare));
 }
 
 /** The cheapest possible route, for turns that cannot need anything. */
-export function shortcutRoute(input: TurnInput): PolicyResult {
+export function shortcutRoute<C extends CatalogSpec = DefaultCatalogSpec>(
+  input: TurnInput,
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): PolicyResult<C> {
   const text = input.message.trim();
-  const why = COMMAND_PREFIX.test(text)
+  const why = catalog.commandPrefix.test(text)
     ? ["slash command: the harness already knows what to run"]
     : text.length === 0
       ? ["empty turn"]
       : ["bare continuation"];
+  const tier = catalog.tierAt(0);
   return {
-    tier: tierAt(0),
-    model: modelFor(tierAt(0)).id,
+    tier,
+    model: catalog.modelFor(tier).id,
     effort: effortAt(0),
     tools: [],
     skill: null,
@@ -77,37 +81,41 @@ export function shortcutRoute(input: TurnInput): PolicyResult {
 const matches = (card: { readonly hints?: readonly RegExp[] }, text: string): boolean =>
   card.hints?.some((hint) => hint.test(text)) === true;
 
-export function heuristicRoute(input: TurnInput): PolicyResult {
-  if (isShortcut(input)) return shortcutRoute(input);
+export function heuristicRoute<C extends CatalogSpec = DefaultCatalogSpec>(
+  input: TurnInput,
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): PolicyResult<C> {
+  if (isShortcut(input, catalog)) return shortcutRoute(input, catalog);
 
   const text = normalize(`${input.message}\n${input.recentContext ?? ""}`);
+  const ladder = catalog.tiers.length;
 
   // The highest tier whose hints fire wins; the cheapest tier is the floor and needs no
   // hints of its own. A long message is treated as at least the middle of the ladder,
   // because length is evidence the wording may not carry.
   let index = 0;
-  MODELS.forEach((model, i) => {
+  catalog.models.forEach((model, i) => {
     if (matches(model, text)) index = Math.max(index, i);
   });
   if (input.message.trim().length > LONG_MESSAGE_CHARS) {
-    index = Math.max(index, Math.floor((TIERS.length - 1) / 2));
+    index = Math.max(index, Math.floor((ladder - 1) / 2));
   }
-  const tier: Tier = tierAt(index);
+  const tier: TierOf<C> = catalog.tierAt(index);
 
   // Effort rides the same ladder, scaled to however many levels each one has.
   const effort = effortAt(
-    TIERS.length <= 1 ? 0 : Math.round((index / (TIERS.length - 1)) * (EFFORTS.length - 1)),
+    ladder <= 1 ? 0 : Math.round((index / (ladder - 1)) * (EFFORTS.length - 1)),
   );
 
   const blocked = new Set(input.session?.unavailableTools ?? []);
-  const tools: ToolId[] = TOOL_IDS.filter(
-    (id) => !blocked.has(id) && matches(TOOLS[id], text),
+  const tools: ToolIdOf<C>[] = catalog.toolIds.filter(
+    (id) => !blocked.has(id) && matches(catalog.toolCard(id), text),
   );
 
   // First match wins, so catalogue order is precedence: specific entries above general.
-  let skill: SkillId | null = null;
-  for (const id of SKILL_IDS) {
-    if (matches(SKILLS[id], text)) {
+  let skill: SkillIdOf<C> | null = null;
+  for (const id of catalog.skillIds) {
+    if (matches(catalog.skillCard(id), text)) {
       skill = id;
       break;
     }
@@ -115,7 +123,7 @@ export function heuristicRoute(input: TurnInput): PolicyResult {
 
   return {
     tier,
-    model: modelFor(tier).id,
+    model: catalog.modelFor(tier).id,
     effort,
     tools,
     skill,

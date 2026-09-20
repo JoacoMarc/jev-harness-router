@@ -1,4 +1,8 @@
+import type { CatalogSpec } from "./catalog/index.ts";
 import type { RouteDecision } from "./types.ts";
+
+/** Any catalogue's decision: only the skill is read, and only as a name. */
+type HasSkill = Pick<RouteDecision<CatalogSpec>, "skill">;
 
 /**
  * Renders the router's decision for the downstream model.
@@ -37,7 +41,7 @@ export const DEFAULT_PROMPT_OPTIONS: Required<PromptOptions> = {
 };
 
 export function renderSkillBlock(
-  decision: Pick<RouteDecision, "skill">,
+  decision: HasSkill,
   options: PromptOptions = {},
 ): string {
   const { tag, suggest, none } = { ...DEFAULT_PROMPT_OPTIONS, ...options };
@@ -55,7 +59,7 @@ export function renderSkillBlock(
  */
 export function systemPromptParts(
   roster: string,
-  decision: Pick<RouteDecision, "skill">,
+  decision: HasSkill,
   options: PromptOptions = {},
 ): { cached: string; suffix: string } {
   return { cached: roster, suffix: renderSkillBlock(decision, options) };

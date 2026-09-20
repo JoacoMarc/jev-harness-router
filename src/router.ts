@@ -1,7 +1,12 @@
 import { performance } from "node:perf_hooks";
 import type { Fetch } from "@typesafe-ai/sdk";
 import { Lru, cacheKey } from "./cache.ts";
-import type { ToolId } from "./catalog/index.ts";
+import {
+  Catalog,
+  DEFAULT_CATALOG,
+  type CatalogSpec,
+  type DefaultCatalogSpec,
+} from "./catalog/index.ts";
 import { heuristicRoute, isShortcut, shortcutRoute } from "./heuristic.ts";
 import { Jev, JevError, defaultDeadlineMs } from "./jev.ts";
 import {
@@ -27,9 +32,18 @@ import type { RouteDecision, Telemetry, TurnInput } from "./types.ts";
 /** Below this much remaining budget the second hop is not attempted at all. */
 export const MIN_RERANK_MS = 120;
 
-export interface RouterOptions {
+export interface RouterOptions<C extends CatalogSpec = DefaultCatalogSpec> {
+  /**
+   * The tiers, tools and skills this router decides between. A `Catalog` from
+   * `defineCatalog`, or the plain spec. Defaults to the shipped example catalogue.
+   */
+  readonly catalog?: Catalog<C> | C;
   /** Total budget for the whole route, second hop included. */
   readonly deadlineMs?: number;
+  /**
+   * Tuned on the default catalogue's fixtures. `tierCuts` assumes a three-tier ladder:
+   * pass your own with one cut per rung above the floor.
+   */
   readonly thresholds?: Thresholds;
   /** Enable the margin-gated rerank pass. Off by default: measure before you pay for it. */
   readonly rerank?: boolean;
@@ -41,18 +55,25 @@ export interface RouterOptions {
   readonly fetch?: Fetch;
 }
 
-export class Router {
+function toCatalog<C extends CatalogSpec>(catalog: Catalog<C> | C | undefined): Catalog<C> {
+  if (catalog === undefined) return DEFAULT_CATALOG as unknown as Catalog<C>;
+  return catalog instanceof Catalog ? catalog : new Catalog(catalog);
+}
+
+export class Router<C extends CatalogSpec = DefaultCatalogSpec> {
+  readonly catalog: Catalog<C>;
   private readonly jev: Jev;
-  private readonly cache: Lru<PolicyResult>;
+  private readonly cache: Lru<PolicyResult<C>>;
   private readonly thresholds: Thresholds;
 
-  constructor(private readonly options: RouterOptions = {}) {
+  constructor(private readonly options: RouterOptions<C> = {}) {
+    this.catalog = toCatalog(options.catalog);
     this.jev = new Jev({
       ...(options.deadlineMs !== undefined ? { deadlineMs: options.deadlineMs } : {}),
       ...(options.model ? { model: options.model } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });
-    this.cache = new Lru<PolicyResult>(options.cacheSize ?? 256);
+    this.cache = new Lru<PolicyResult<C>>(options.cacheSize ?? 256);
     this.thresholds = options.thresholds ?? DEFAULT_THRESHOLDS;
   }
 
@@ -76,28 +97,31 @@ export class Router {
     return this.jev.prewarm();
   }
 
-  async route(input: TurnInput, signal?: AbortSignal): Promise<RouteDecision> {
+  async route(input: TurnInput, signal?: AbortSignal): Promise<RouteDecision<C>> {
     const started = performance.now();
     const since = () => performance.now() - started;
+    const { catalog, thresholds } = this;
 
     // Lane 1. The cheapest call is the one that never happens, and a slash command or a
     // bare "dale" is answerable from a regex. Direct evidence stays in code.
-    if (isShortcut(input)) {
-      return finish(shortcutRoute(input), "shortcut", since(), 0, 0, 0, 0, null);
+    if (isShortcut(input, catalog)) {
+      return finish(shortcutRoute(input, catalog), "shortcut", since(), 0, 0, 0, 0, null);
     }
 
     const state = buildState(input);
-    const key = cacheKey(state);
+    const key = cacheKey(state, catalog.version);
 
     // Lane 2.
     const cached = this.cache.get(key);
     if (cached) return finish(cached, "cache", since(), 0, 0, 0, 0, null);
 
     // Lane 3.
-    const tools = availableTools(input);
-    const questions = buildQuestions(tools, {
-      structuredSkillCriteria: this.options.structuredSkillCriteria ?? true,
-    });
+    const tools = availableTools(input, catalog);
+    const questions = buildQuestions(
+      tools,
+      { structuredSkillCriteria: this.options.structuredSkillCriteria ?? true },
+      catalog,
+    );
 
     let first;
     try {
@@ -105,12 +129,12 @@ export class Router {
       // for it; it does not stop the request, and whatever eventually lands goes into
       // the cache so a re-sent turn gets it for free.
       first = await this.jev.ask(state, questions, signal, (late) => {
-        this.cache.set(key, decide(late.answers, tools, this.thresholds));
+        this.cache.set(key, decide(late.answers, tools, thresholds, catalog));
       });
     } catch (error) {
       const failure = error instanceof JevError ? error.failure : "network";
       const reason = error instanceof Error ? error.message : String(error);
-      const fallback = heuristicRoute(input);
+      const fallback = heuristicRoute(input, catalog);
       return finish(
         { ...fallback, why: [`jev ${failure}: ${reason}`, ...fallback.why] },
         "fallback",
@@ -123,7 +147,7 @@ export class Router {
       );
     }
 
-    let result = decide(first.answers, tools, this.thresholds);
+    let result = decide(first.answers, tools, thresholds, catalog);
     let hops = 1;
     let jevMs = first.jevMs;
     let inputTokens = first.inputTokens;
@@ -137,16 +161,16 @@ export class Router {
       result.diagnostics.rerankWorthwhile &&
       remaining >= MIN_RERANK_MS
     ) {
-      const names = topSkills(first.answers, this.thresholds.shortlist);
+      const names = topSkills(first.answers, thresholds.shortlist, catalog);
       // A second call that re-reads the same criteria is a round trip spent on nothing.
-      if (names.length > 0 && rerankAddsEvidence(names)) {
+      if (names.length > 0 && rerankAddsEvidence(names, catalog)) {
         try {
           const second = await new Jev({
             deadlineMs: Math.floor(remaining),
             ...(this.options.model ? { model: this.options.model } : {}),
             ...(this.options.fetch ? { fetch: this.options.fetch } : {}),
-          }).ask(state, buildRerankQuestions(names), signal);
-          result = applyRerank(result, second.answers, names, this.thresholds);
+          }).ask(state, buildRerankQuestions(names, catalog), signal);
+          result = applyRerank(result, second.answers, names, thresholds, catalog);
           hops = 2;
           jevMs += second.jevMs;
           inputTokens += second.inputTokens;
@@ -175,7 +199,19 @@ export class Router {
   }
 }
 
-export function createRouter(options: RouterOptions = {}): Router {
+/**
+ * The entry point.
+ *
+ * ```ts
+ * const router = createRouter({ catalog: defineCatalog({ models, tools, skills }) });
+ * const route = await router.route({ message });
+ * ```
+ *
+ * With no `catalog` it runs on the shipped example — useful to try it, wrong to ship.
+ */
+export function createRouter<const C extends CatalogSpec = DefaultCatalogSpec>(
+  options: RouterOptions<C> = {},
+): Router<C> {
   return new Router(options);
 }
 
@@ -210,8 +246,8 @@ export class SequenceGate {
   }
 }
 
-function finish(
-  result: PolicyResult,
+function finish<C extends CatalogSpec>(
+  result: PolicyResult<C>,
   source: RouteDecision["source"],
   totalMs: number,
   jevMs: number,
@@ -220,7 +256,7 @@ function finish(
   outputTokens: number,
   model: string | null,
   requestId?: string | undefined,
-): RouteDecision {
+): RouteDecision<C> {
   const telemetry: Telemetry = {
     totalMs,
     jevMs,
@@ -234,7 +270,7 @@ function finish(
     tier: result.tier,
     model: result.model,
     effort: result.effort,
-    tools: result.tools as readonly ToolId[],
+    tools: result.tools,
     skill: result.skill,
     source,
     why: result.why,

@@ -3,6 +3,33 @@
   "version": "1.0.0",
   "description": "Per-turn harness router: one Jev call picks the model tier, tools, skill and effort budget for an agent turn.",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "agent",
+    "harness",
+    "router",
+    "model-routing",
+    "llm",
+    "typesafe",
+    "jev",
+    "claude",
+    "agent-sdk",
+    "skills",
+    "tool-selection"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -15,7 +42,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings src bin test",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "@typesafe-ai/sdk": "0.6.0"
@@ -31,5 +60,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JoacoMarc/jev-harness-router.git"
+  },
+  "homepage": "https://github.com/JoacoMarc/jev-harness-router#readme",
+  "bugs": {
+    "url": "https://github.com/JoacoMarc/jev-harness-router/issues"
   }
 }

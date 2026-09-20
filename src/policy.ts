@@ -1,19 +1,16 @@
+import type { ChoiceResponse, NoulResponse, ScoreResponse } from "@typesafe-ai/sdk";
 import {
+  DEFAULT_CATALOG,
   EFFORTS,
   NO_SKILL,
-  TOOLS,
-  isSkillId,
-  isToolId,
   maxEffort,
-  maxTier,
-  modelFor,
-  thresholdFor,
-  tierAt,
-  TIERS,
+  type Catalog,
+  type CatalogSpec,
+  type DefaultCatalogSpec,
   type Effort,
-  type SkillId,
-  type Tier,
-  type ToolId,
+  type SkillIdOf,
+  type TierOf,
+  type ToolIdOf,
 } from "./catalog/index.ts";
 import {
   GATE_IDS,
@@ -34,6 +31,9 @@ import {
  * it means moving a threshold re-derives a route from stored probabilities without
  * spending another request.
  */
+
+const fallbackCatalog = <C extends CatalogSpec>(): Catalog<C> =>
+  DEFAULT_CATALOG as unknown as Catalog<C>;
 
 export interface Thresholds {
   /** Mean of the three request-shape gates, below which no skill is suggested. */
@@ -57,15 +57,19 @@ export interface Thresholds {
   readonly difficultyQuantile: number;
   /** Same, for scope. */
   readonly scopeQuantile: number;
-  /** Difficulty level at or above which the tier steps up. Length must be TIERS-1. */
+  /**
+   * Difficulty level at or above which the tier steps up. One cut per rung above the
+   * floor, so a catalogue with N tiers wants N-1 of these; extra cuts are never reached
+   * and missing ones leave the top rungs unused.
+   */
   readonly tierCuts: readonly number[];
   /** Difficulty level at or above which effort steps up. Length must be EFFORTS-1. */
   readonly effortCuts: readonly number[];
   /** Scope level at or above which the tier is floored at `scopeFloorTier`. */
   readonly scopeFloor: number;
   /**
-   * Index into `TIERS` that a broad-scope turn is floored at. An index rather than a
-   * name, so a catalogue with two tiers or five needs no edit here.
+   * Index into the catalogue's tier ladder that a broad-scope turn is floored at. An
+   * index rather than a name, so a catalogue with two tiers or five needs no edit here.
    */
   readonly scopeFloorTier: number;
   /** Multiplies every per-risk tool bar at once, so the whole set can be swept as one knob. */
@@ -108,6 +112,8 @@ export interface Thresholds {
  *
  * Fifty-four labelled turns is a small sample and the labels are one person's judgement.
  * Re-run the sweep on your own traffic before trusting these to three decimal places.
+ * `tierCuts` in particular assumes a three-tier ladder; a catalogue with two or four
+ * tiers should pass its own.
  */
 export const DEFAULT_THRESHOLDS: Thresholds = {
   gate: 0.2,
@@ -126,12 +132,12 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   toolScale: 1,
 };
 
-export interface PolicyResult {
-  readonly tier: Tier;
+export interface PolicyResult<C extends CatalogSpec = DefaultCatalogSpec> {
+  readonly tier: TierOf<C>;
   readonly model: string;
   readonly effort: Effort;
-  readonly tools: readonly ToolId[];
-  readonly skill: SkillId | null;
+  readonly tools: readonly ToolIdOf<C>[];
+  readonly skill: SkillIdOf<C> | null;
   readonly why: readonly string[];
   readonly diagnostics: Diagnostics;
 }
@@ -152,6 +158,40 @@ export interface Diagnostics {
   /** True when a second hop over the top skills would plausibly change the answer. */
   readonly rerankWorthwhile: boolean;
 }
+
+// ---------------------------------------------------------------- reading answers
+
+/**
+ * Answers seen by id, without the catalogue-specific key types.
+ *
+ * The typed `RouterAnswers<C>` is what callers get and what the tests assert on. Inside
+ * the policy the catalogue is a type parameter, and indexing a mapped type by a generic
+ * template-literal key is something TypeScript will not resolve — so the policy reads
+ * through this view and checks each answer's `type` tag at runtime instead.
+ */
+type AnswerView = Readonly<Record<string, NoulResponse | ChoiceResponse | ScoreResponse | undefined>>;
+
+const view = (answers: object): AnswerView => answers as AnswerView;
+
+function noulAt(answers: AnswerView, id: string): number {
+  const a = answers[id];
+  if (!a || a.type !== "noul") throw new Error(`Expected a Noul answer at "${id}"`);
+  return a.noul;
+}
+
+function choiceAt(answers: AnswerView, id: string): ChoiceResponse {
+  const a = answers[id];
+  if (!a || a.type !== "choice") throw new Error(`Expected a Choice answer at "${id}"`);
+  return a;
+}
+
+function scoreAt(answers: AnswerView, id: string): ScoreResponse {
+  const a = answers[id];
+  if (!a || a.type !== "score") throw new Error(`Expected a Score answer at "${id}"`);
+  return a;
+}
+
+// ---------------------------------------------------------------- arithmetic
 
 /** Steps up through an ordered ladder by counting how many cuts the value clears. */
 function bucket<T>(ladder: readonly T[], cuts: readonly number[], value: number): T {
@@ -198,50 +238,57 @@ export function margin(probabilities: Readonly<Record<string, number>>): number 
 }
 
 /**
- * Folds the three gates into one number.
+ * Folds the gates into one number.
  *
- * A mean, not a max: these are three angles on the same question, so one weak probe
- * should not carry the decision. Risk flags are the opposite case and use `max` below,
- * because averaging a red flag is how you silence it.
+ * A mean, not a max: these are angles on the same question, so one weak probe should
+ * not carry the decision. Risk flags are the opposite case and use `max`, because
+ * averaging a red flag is how you silence it.
  */
-export function gateScore(answers: RouterAnswers): {
+export function gateScore<C extends CatalogSpec = DefaultCatalogSpec>(
+  answers: RouterAnswers<C>,
+): {
   score: number;
   values: Record<string, number>;
 } {
+  const a = view(answers);
   const values: Record<string, number> = {};
   let sum = 0;
   for (const id of GATE_IDS) {
-    const raw = answers[gateId(id)].noul;
+    const raw = noulAt(a, gateId(id));
     values[id] = raw;
     sum += INVERTED_GATES.has(id) ? 1 - raw : raw;
   }
   return { score: sum / GATE_IDS.length, values };
 }
 
-export function decide(
-  answers: RouterAnswers,
-  asked: readonly ToolId[],
+// ---------------------------------------------------------------- the decision
+
+export function decide<C extends CatalogSpec = DefaultCatalogSpec>(
+  answers: RouterAnswers<C>,
+  asked: readonly ToolIdOf<C>[],
   thresholds: Thresholds = DEFAULT_THRESHOLDS,
-): PolicyResult {
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): PolicyResult<C> {
+  const a = view(answers);
   const why: string[] = [];
 
-  const difficulty = answers[Q.difficulty];
-  const scope = answers[Q.scope];
-  const intent = answers[Q.intent];
+  const difficulty = scoreAt(a, Q.difficulty);
+  const scope = scoreAt(a, Q.scope);
+  const intent = choiceAt(a, Q.intent);
 
   // ---- model tier and effort -------------------------------------------------
   const difficultyLevel = scoreQuantile(difficulty.probabilities, thresholds.difficultyQuantile);
   const scopeLevel = scoreQuantile(scope.probabilities, thresholds.scopeQuantile);
 
-  let tier = bucket(TIERS, thresholds.tierCuts, difficultyLevel);
+  let tier = bucket(catalog.tiers, thresholds.tierCuts, difficultyLevel);
   let effort = bucket(EFFORTS, thresholds.effortCuts, difficultyLevel);
   why.push(
     `difficulty level ${difficultyLevel} (expectation ${difficulty.score.toFixed(2)}) -> ${tier}/${effort}`,
   );
 
   if (scopeLevel >= thresholds.scopeFloor) {
-    const floor = tierAt(thresholds.scopeFloorTier);
-    const floored = maxTier(tier, floor);
+    const floor = catalog.tierAt(thresholds.scopeFloorTier);
+    const floored = catalog.maxTier(tier, floor);
     if (floored !== tier) why.push(`scope level ${scopeLevel} floors tier at ${floor}`);
     tier = floored;
   }
@@ -250,20 +297,20 @@ export function decide(
   // hard the turn is, the cost of a needlessly big model is visible and bounded; the
   // cost of a needlessly small one is a silently worse answer.
   if (difficulty.confidence < thresholds.escalateConfidence) {
-    const up = tierAt(TIERS.indexOf(tier) + 1);
+    const up = catalog.tierAt(catalog.tierIndex(tier) + 1);
     const upEffort = EFFORTS[Math.min(EFFORTS.indexOf(effort) + 1, EFFORTS.length - 1)] as Effort;
     if (up !== tier || upEffort !== effort) {
       why.push(`difficulty confidence ${difficulty.confidence.toFixed(2)} is low, escalating`);
     }
-    tier = maxTier(tier, up);
+    tier = catalog.maxTier(tier, up);
     effort = maxEffort(effort, upEffort);
   }
 
   // ---- tools -----------------------------------------------------------------
-  const tools: ToolId[] = [];
+  const tools: ToolIdOf<C>[] = [];
   for (const id of asked) {
-    const p = answers[toolId(id)].noul;
-    if (p >= thresholdFor(id) * thresholds.toolScale) tools.push(id);
+    const p = noulAt(a, toolId(id));
+    if (p >= catalog.thresholdFor(id) * thresholds.toolScale) tools.push(id);
   }
 
   // The Choice is relative and the Nouls are absolute, so they answer different
@@ -272,17 +319,18 @@ export function decide(
   // when it is read-only. A write or execute tool has to clear its own absolute bar,
   // because the message driving this decision is untrusted input.
   const toolProbabilities: Record<string, number> = {};
-  const which = answers[Q.toolWhich];
+  const which = choiceAt(a, Q.toolWhich);
   for (const [label, p] of Object.entries(which.probabilities)) {
     toolProbabilities[label] = p;
-    if (label === NO_SKILL || !isToolId(label)) continue;
+    if (label === NO_SKILL || !catalog.isToolId(label)) continue;
     if (!asked.includes(label) || tools.includes(label)) continue;
     if (p < thresholds.toolTail) continue;
-    if (TOOLS[label].risk === "read") {
+    const risk = catalog.toolCard(label).risk;
+    if (risk === "read") {
       tools.push(label);
       why.push(`${label} added from the tool ranking tail (p=${p.toFixed(2)})`);
     } else {
-      why.push(`${label} ranked high (p=${p.toFixed(2)}) but is ${TOOLS[label].risk}-risk; held back`);
+      why.push(`${label} ranked high (p=${p.toFixed(2)}) but is ${risk}-risk; held back`);
     }
   }
 
@@ -290,9 +338,9 @@ export function decide(
 
   // ---- skill -----------------------------------------------------------------
   const gate = gateScore(answers);
-  const skillAnswer = answers[Q.skill];
+  const skillAnswer = choiceAt(a, Q.skill);
   const skillMargin = margin(skillAnswer.probabilities);
-  let skill: SkillId | null = null;
+  let skill: SkillIdOf<C> | null = null;
 
   if (gate.score < thresholds.gate) {
     why.push(`gate ${gate.score.toFixed(2)} below ${thresholds.gate}, no skill`);
@@ -302,7 +350,7 @@ export function decide(
     why.push(
       `skill "${skillAnswer.choice}" at confidence ${skillAnswer.confidence.toFixed(2)}, below ${thresholds.skillConfidence}`,
     );
-  } else if (isSkillId(skillAnswer.choice)) {
+  } else if (catalog.isSkillId(skillAnswer.choice)) {
     skill = skillAnswer.choice;
     why.push(`skill ${skill} (confidence ${skillAnswer.confidence.toFixed(2)})`);
   } else {
@@ -317,7 +365,7 @@ export function decide(
 
   return {
     tier,
-    model: modelFor(tier).id,
+    model: catalog.modelFor(tier).id,
     effort,
     tools,
     skill,
@@ -342,9 +390,13 @@ export function decide(
 // ---------------------------------------------------------------- second hop
 
 /** The best `count` real skills from the first pass, `none` excluded. */
-export function topSkills(answers: RouterAnswers, count: number): SkillId[] {
-  return Object.entries(answers[Q.skill].probabilities)
-    .filter((entry): entry is [SkillId, number] => isSkillId(entry[0]))
+export function topSkills<C extends CatalogSpec = DefaultCatalogSpec>(
+  answers: RouterAnswers<C>,
+  count: number,
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): SkillIdOf<C>[] {
+  return Object.entries(choiceAt(view(answers), Q.skill).probabilities)
+    .filter((entry): entry is [SkillIdOf<C>, number] => catalog.isSkillId(entry[0]))
     .sort((a, b) => b[1] - a[1])
     .slice(0, count)
     .map(([id]) => id);
@@ -357,14 +409,16 @@ export function topSkills(answers: RouterAnswers, count: number): SkillId[] {
  * winner among the finalists, so the absolute `fits` Nouls are what allow the whole
  * shortlist to be thrown out.
  */
-export function applyRerank(
-  first: PolicyResult,
-  answers: RerankAnswers,
-  names: readonly SkillId[],
+export function applyRerank<C extends CatalogSpec = DefaultCatalogSpec>(
+  first: PolicyResult<C>,
+  answers: RerankAnswers<C>,
+  names: readonly SkillIdOf<C>[],
   thresholds: Thresholds = DEFAULT_THRESHOLDS,
-): PolicyResult {
+  catalog: Catalog<C> = fallbackCatalog<C>(),
+): PolicyResult<C> {
+  const a = view(answers);
   const why = [...first.why];
-  const fits = names.map((id) => answers[fitsId(id)].noul);
+  const fits = names.map((id) => noulAt(a, fitsId(id)));
   const best = fits.length > 0 ? Math.max(...fits) : 0;
 
   if (best < thresholds.fits) {
@@ -372,8 +426,8 @@ export function applyRerank(
     return { ...first, skill: null, why };
   }
 
-  const winner = answers[Q.skill].choice;
-  if (winner === NO_SKILL || !isSkillId(winner)) {
+  const winner = choiceAt(a, Q.skill).choice;
+  if (winner === NO_SKILL || !catalog.isSkillId(winner)) {
     why.push("rerank: picked none");
     return { ...first, skill: null, why };
   }

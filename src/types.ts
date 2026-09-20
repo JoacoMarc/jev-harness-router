@@ -1,4 +1,11 @@
-import type { Effort, SkillId, Tier, ToolId } from "./catalog/index.ts";
+import type {
+  CatalogSpec,
+  DefaultCatalogSpec,
+  Effort,
+  SkillIdOf,
+  TierOf,
+  ToolIdOf,
+} from "./catalog/index.ts";
 
 /** What the harness hands the router at the start of a turn. */
 export interface TurnInput {
@@ -19,9 +26,13 @@ export interface SessionFacts {
   readonly cwdKind?: string;
   readonly openFiles?: readonly string[];
   readonly lastToolsUsed?: readonly string[];
-  readonly lastTier?: Tier;
-  /** Tools the harness cannot offer this turn. Removed in code before Jev ever sees them. */
-  readonly unavailableTools?: readonly ToolId[];
+  /** One of the catalogue's tier names. */
+  readonly lastTier?: string;
+  /**
+   * Tools the harness cannot offer this turn, by catalogue id. Removed in code before
+   * Jev ever sees them; ids not in the catalogue are ignored.
+   */
+  readonly unavailableTools?: readonly string[];
 }
 
 /** The compact object sent as Jev's `state`. Questions reference its fields by name. */
@@ -44,12 +55,16 @@ export type DecisionSource =
   /** Jev missed the deadline or failed. The heuristic answered instead. */
   | "fallback";
 
-export interface RouteDecision {
-  readonly tier: Tier;
+/**
+ * What the router hands back. Generic over the catalogue it was built from, so
+ * `route.tier`, `route.tools` and `route.skill` are unions of *your* names.
+ */
+export interface RouteDecision<C extends CatalogSpec = DefaultCatalogSpec> {
+  readonly tier: TierOf<C>;
   readonly model: string;
   readonly effort: Effort;
-  readonly tools: readonly ToolId[];
-  readonly skill: SkillId | null;
+  readonly tools: readonly ToolIdOf<C>[];
+  readonly skill: SkillIdOf<C> | null;
   readonly source: DecisionSource;
   /** Short, human-readable notes on why this route came out the way it did. */
   readonly why: readonly string[];

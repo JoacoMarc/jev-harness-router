@@ -16,7 +16,7 @@ import { buildQuestions } from "../src/questions.ts";
 import type { RouterAnswers } from "../src/questions.ts";
 import { availableTools, buildState } from "../src/state.ts";
 import { heuristicRoute, isShortcut, shortcutRoute } from "../src/heuristic.ts";
-import { TIERS } from "../src/catalog/index.ts";
+import { TIERS, type ToolId } from "../src/catalog/index.ts";
 import { USD_PER_INPUT_TOKEN } from "../src/types.ts";
 import { loadEnv, pct, pool, readFixtures, requireKey, setScore, table, transport, type Fixture } from "./util.ts";
 
@@ -37,7 +37,7 @@ console.log(`\n${fixtures.length} labelled turns, ${structured ? "structured" : 
 interface Sample {
   fixture: Fixture;
   answers: RouterAnswers | null;
-  asked: ReturnType<typeof availableTools>;
+  asked: readonly ToolId[];
   inputTokens: number;
   jevMs: number;
 }

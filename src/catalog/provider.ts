@@ -1,4 +1,4 @@
-import type { Effort } from "./models.ts";
+import type { Effort } from "./types.ts";
 
 /**
  * Where the routed turn actually runs.

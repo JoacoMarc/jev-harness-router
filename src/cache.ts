@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { CATALOG_VERSION } from "./catalog/index.ts";
+import { DEFAULT_CATALOG } from "./catalog/index.ts";
 import type { TurnState } from "./types.ts";
 
 /**
@@ -45,9 +45,10 @@ export class Lru<V> {
   }
 }
 
-export function cacheKey(state: TurnState): string {
+/** `catalogVersion` is `Catalog.version`: the fingerprint of what the model was shown. */
+export function cacheKey(state: TurnState, catalogVersion: string = DEFAULT_CATALOG.version): string {
   return createHash("sha256")
-    .update(CATALOG_VERSION)
+    .update(catalogVersion)
     .update("::")
     .update(JSON.stringify(state))
     .digest("hex")

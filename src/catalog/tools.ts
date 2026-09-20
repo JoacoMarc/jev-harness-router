@@ -1,10 +1,10 @@
 /**
  * The harness tool catalogue.
  *
- * ── Edit this file to make the router yours. ─────────────────────────────────
- * Replace the entries with the tools your harness can actually offer. `ToolId`,
- * the question set and `route.tools` all derive from the keys, so nothing else
- * needs touching.
+ * ── The shipped default. ─────────────────────────────────────────────────────
+ * Using the package as a dependency? Pass your own to `createRouter({ catalog })`
+ * via `defineCatalog` and leave this file alone. Cloned the repo? Edit it here.
+ * `ToolId`, the question set and `route.tools` all derive from the keys.
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * Tool selection is multi-label: several tools can apply to one turn, and it is
@@ -17,40 +17,7 @@
  * "reads a file from the filesystem".
  */
 
-/**
- * What it costs to be wrong about enabling this tool.
- *
- * Enabling a read-only tool nobody needed wastes a little context. Enabling `Bash` on a
- * turn that did not ask for it hands an untrusted user message a shell. The state Jev
- * reads is attacker-influenced by construction, and `jev-1.13` does not treat state as
- * hostile, so the floor has to live here in code rather than in the model's answer.
- */
-export const RISKS = ["read", "write", "execute"] as const;
-export type Risk = (typeof RISKS)[number];
-
-/** Default Noul probability a tool must clear to be enabled, by risk class. */
-export const RISK_THRESHOLD: Record<Risk, number> = {
-  read: 0.35,
-  write: 0.6,
-  execute: 0.8,
-};
-
-export interface ToolCard {
-  readonly description: string;
-  readonly risk: Risk;
-  /** Overrides `RISK_THRESHOLD[risk]` when this specific tool needs a different bar. */
-  readonly threshold?: number;
-  /** Always enabled, never asked about. Keeps cheap always-on tools out of the request. */
-  readonly always?: true;
-  /**
-   * Patterns for the offline heuristic only — the fallback when Jev misses the deadline,
-   * and the baseline the eval scores against. Jev never sees them; it reads
-   * `description`.
-   *
-   * Matched against diacritic-folded text, so write them unaccented.
-   */
-  readonly hints?: readonly RegExp[];
-}
+import type { ToolCard } from "./types.ts";
 
 export const TOOLS = {
   Read: {
@@ -121,16 +88,3 @@ export const TOOLS = {
     hints: [/\b(pasos?|steps?|plan|checklist|primero.*despues)\b/i],
   },
 } as const satisfies Record<string, ToolCard>;
-
-export type ToolId = keyof typeof TOOLS;
-
-export const TOOL_IDS = Object.keys(TOOLS) as ToolId[];
-
-export function thresholdFor(id: ToolId): number {
-  const card: ToolCard = TOOLS[id];
-  return card.threshold ?? RISK_THRESHOLD[card.risk];
-}
-
-export function isToolId(value: string): value is ToolId {
-  return Object.hasOwn(TOOLS, value);
-}

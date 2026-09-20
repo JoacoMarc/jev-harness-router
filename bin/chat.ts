@@ -15,7 +15,7 @@
  * would be a bad thing to ship. The tool decision is shown and handed to the model as
  * context; running it is your harness's job.
  */
-import { SKILLS, SKILL_IDS, TOOLS, modelFor } from "../src/catalog/index.ts";
+import { DEFAULT_CATALOG, SKILLS, SKILL_IDS, TOOLS } from "../src/catalog/index.ts";
 import { PROVIDER } from "../src/catalog/provider.ts";
 import { createRouter } from "../src/router.ts";
 import { systemPromptParts } from "../src/prompt.ts";
@@ -63,7 +63,7 @@ const history: Message[] = [];
 function describe(route: RouteDecision): string {
   const tools = route.tools.length ? route.tools.join(", ") : "none";
   return (
-    `    router  ${modelFor(route.tier).label} · effort ${route.effort} · ` +
+    `    router  ${DEFAULT_CATALOG.modelFor(route.tier).label} · effort ${route.effort} · ` +
     `skill ${route.skill ?? "none"} · tools ${tools}` +
     `\n            ${ms(route.telemetry.totalMs)} to decide, via ${route.source}`
   );
