@@ -76,6 +76,9 @@ export type { CompleteRequest, FetchLike, Message, Reply } from "./provider.ts";
 
 export { isMock, mockFetch } from "./mock.ts";
 
+export { toQueryOptions } from "./adapters/agent-sdk.ts";
+export type { AgentSdkOptions, AgentSdkQueryOptions, AgentSdkEffort, RoutedTurn } from "./adapters/agent-sdk.ts";
+
 export type {
   RouteDecision,
   DecisionSource,

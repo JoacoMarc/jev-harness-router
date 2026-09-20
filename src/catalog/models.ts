@@ -16,6 +16,9 @@
 
 import type { ModelCard } from "./types.ts";
 
+// Prices are Anthropic list rates, USD per million tokens, as of 2026-06. Check
+// https://docs.claude.com/en/docs/about-claude/pricing before trusting a savings number.
+
 /**
  * Ordered cheapest and fastest first. **The order is the capability ladder** — policy
  * escalates by index, so an entry's position matters more than its name.
@@ -23,9 +26,10 @@ import type { ModelCard } from "./types.ts";
 export const MODELS = [
   {
     tier: "fast",
-    id: "claude-haiku-4-5-20251001",
+    id: "claude-haiku-4-5",
     label: "Haiku 4.5",
     use: "Lookups, single-file edits, mechanical transforms, short answers.",
+    price: { input: 1, output: 5 },
     hints: [],
   },
   {
@@ -33,6 +37,7 @@ export const MODELS = [
     id: "claude-sonnet-5",
     label: "Sonnet 5",
     use: "Ordinary feature work and debugging across a handful of files.",
+    price: { input: 2, output: 10 },
     hints: [
       /\b(implement\w*|agreg\w*|add |featur\w*|bug|error|falla|rompe|broken|fix|arregl\w*|test\w*|refactor|integr\w*|debug\w*)\b/i,
     ],
@@ -42,6 +47,7 @@ export const MODELS = [
     id: "claude-opus-5",
     label: "Opus 5",
     use: "Architecture, cross-cutting refactors, ambiguous or high-stakes work.",
+    price: { input: 5, output: 25 },
     hints: [
       /\b(refactor\w*|arquitectur\w*|architect\w*|migrat\w*|migrac\w*|redisen\w*|redesign|trade-?offs?|estrateg\w*|strateg\w*|por que|why does|design (a|the)|disen\w*)\b/i,
     ],

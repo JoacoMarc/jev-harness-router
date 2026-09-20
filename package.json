@@ -28,7 +28,8 @@
     "claude",
     "agent-sdk",
     "skills",
-    "tool-selection"
+    "tool-selection",
+    "claude-agent-sdk"
   ],
   "engines": {
     "node": ">=22"
@@ -39,8 +40,10 @@
     "calibrate": "tsx bin/calibrate.ts",
     "eval": "tsx bin/eval.ts",
     "bench": "tsx bin/bench.ts",
+    "savings": "tsx bin/savings.ts",
+    "example:agent-sdk": "tsx examples/agent-sdk.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --deny-warnings src bin test",
+    "lint": "oxlint --deny-warnings src bin test examples",
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
@@ -50,6 +53,7 @@
     "@typesafe-ai/sdk": "0.6.0"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.278",
     "@types/node": "22.20.3",
     "oxlint": "1.19.0",
     "tsx": "4.23.13",

@@ -18,7 +18,7 @@ import { createRouter, defineCatalog } from "jev-harness-router";
 
 const catalog = defineCatalog({
   models: [                                // cheapest first — the order is the ladder
-    { tier: "fast", id: "claude-haiku-4-5-20251001", label: "Haiku", use: "Lookups, one-file edits." },
+    { tier: "fast", id: "claude-haiku-4-5", label: "Haiku", use: "Lookups, one-file edits." },
     { tier: "deep", id: "claude-opus-5",             label: "Opus",  use: "Design, cross-cutting work." },
   ],
   tools: {
@@ -186,7 +186,7 @@ most of the win.
 
 ```ts
 models: [
-  { tier: "fast",     id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", use: "…", hints: [] },
+  { tier: "fast",     id: "claude-haiku-4-5", label: "Haiku 4.5", use: "…", hints: [] },
   { tier: "balanced", id: "claude-sonnet-5",           label: "Sonnet 5",  use: "…", hints: [/…/] },
   { tier: "deep",     id: "claude-opus-5",             label: "Opus 5",    use: "…", hints: [/…/] },
 ],
@@ -379,6 +379,40 @@ The wording comes from the skill-suggestion cookbook, including the part that sa
 suggestion may be ignored — pushing harder also wins compliance on the *wrong*
 suggestions, and a wrong one is worse than none.
 
+### Running it on the Claude Agent SDK
+
+The [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) takes `model`,
+`effort`, the tool set and a system-prompt suffix **per `query()` call** — the four things
+the router decides. `toQueryOptions` maps one onto the other:
+
+```ts
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { createRouter, toQueryOptions } from "jev-harness-router";
+
+const route = await router.route({ message });
+for await (const m of query({
+  prompt: message,
+  options: { ...toQueryOptions(route), cwd: process.cwd() },
+})) { /* … */ }
+```
+
+`model` and `effort` go straight through. The routed tools become the SDK's `tools`, so the
+turn's Claude Code has only those (`{ tools: "allow" }` uses `allowedTools` instead, and
+`alwaysTools: ["Read"]` pins what must always exist). The skill block is appended to the
+`claude_code` preset system prompt, after everything Claude Code puts there, so the cached
+prefix is untouched. No runtime dependency on the SDK: the result is checked against the
+SDK's `Options` type in the tests.
+
+```bash
+npm run example:agent-sdk -- "explicame qué hace src/router.ts"   # routes, then runs it, read-only
+npm run savings                                                    # prices the model mix vs always-top-tier
+```
+
+`savings` routes the fixtures and prices the resulting mix with the list prices on the
+model cards. It is a price mix under the assumption that every turn costs the same tokens
+whichever model runs it — a cheaper model that needs more turns is not cheaper. Read the
+Agent SDK's `modelUsage` on your own traffic before believing the percentage.
+
 ### What it deliberately does not do
 
 **It does not execute tools.** The router decides which tools a turn should have, and
@@ -449,8 +483,10 @@ npm run eval                             # accuracy vs the baseline, plus sweeps
 npm run eval -- --replay <dump>          # re-sweep offline, zero API calls
 npm run eval -- --strings                # A/B plain string skill criteria
 npm run bench                            # percentiles, batching ablation, deadline curve
+npm run savings                          # price the routed model mix vs always-top-tier
+npm run example:agent-sdk -- "<turn>"     # route, then run it on the Claude Agent SDK (read-only)
 
-npm test                                 # 105 tests, no key, no network
+npm test                                 # 113 tests, no key, no network
 npm run typecheck
 npm run lint
 ```

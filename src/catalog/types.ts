@@ -43,6 +43,11 @@ export interface ModelCard {
   /** What this tier is for, in the harness operator's terms. Never sent to Jev. */
   readonly use: string;
   /**
+   * List price in USD per million tokens, for `npm run savings` and anything else that
+   * wants to put a number on a routing decision. Never sent to Jev; optional.
+   */
+  readonly price?: { readonly input: number; readonly output: number };
+  /**
    * Patterns that mean "this turn deserves at least this tier", for the offline
    * heuristic only — the fallback when Jev misses the deadline, and the baseline the
    * eval scores against. Jev never sees them.
