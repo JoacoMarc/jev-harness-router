@@ -226,9 +226,9 @@ in the model's answer.
 `catalog.skills` · in a clone, `src/catalog/skills.ts`
 
 ```ts
-"ita-commit": {
-  description: "Commit staged work with a Conventional Commits message in the ITA format.",
-  notFor: "Opening a pull request, which is ita-create-pr.",  // for confusable neighbours
+"commit": {
+  description: "Commit staged work with a Conventional Commits message in the team's format.",
+  notFor: "Opening a pull request, which is create-pr.",  // for confusable neighbours
   examples: ["commiteá esto", "hacé el commit de los cambios"],
   detail: "…",                                               // sent only on the optional 2nd hop
   hints: [/…/],
@@ -238,7 +238,7 @@ in the model's answer.
 **Declaration order is the offline heuristic's precedence.** Jev does not care — a
 Choice's criteria is a map — but the fallback takes the first card whose `hints` match, so
 specific entries go above general ones: `docx-to-trello` sits above `trello-cli`,
-`ita-review-code` above `code-review`.
+`team-code-review` above `code-review`.
 
 A `Choice` accepts up to 255 options, and the docs recommend giving the model the full
 list rather than a shortlist.
@@ -298,20 +298,20 @@ assistant reply as `recentContext`, which is what a harness would hand the route
 | | keyword baseline | router | |
 | --- | --- | --- | --- |
 | skill exact | 59.4% | **90.0%** | +30.6pp |
-| skill missed | 30.4% | **14.3%** | +16.1pp |
+| skill missed | 30.4% | **12.5%** | +17.9pp |
 | skill false positive | 36.3% | **8.1%** | +28.2pp |
 | tier too cheap | 19.9% | **3.3%** | +16.6pp |
 | tier within 1 | 95.0% | 95.0% | ±0 |
-| tier exact | 59.7% | **63.0%** | +3.3pp |
-| tool recall | 60.6% | **69.1%** | +8.5pp |
-| tool precision | 39.2% | **55.9%** | +16.7pp |
+| tier exact | 59.7% | **60.8%** | +1.1pp |
+| tool recall | 60.6% | **66.0%** | +5.4pp |
+| tool precision | 39.2% | **53.6%** | +14.4pp |
 
 The regex baseline held up on the 54 turns written for it and fell apart on the real ones:
 its skill hints fire on a third of turns where no skill applies. Read the tier rows together.
 Both land within one tier 95% of the time; the baseline under-provisions on a fifth of
 turns, the router on 3.3%. **Too big shows up on the bill. Too small shows up as a worse
 answer nobody notices** — so the estimator is deliberately biased against it. Reading the
-median instead (`difficultyQuantile: 0.5`) buys 68.0% exact for 6.1% too cheap; the sweep
+median instead (`difficultyQuantile: 0.5`) buys about 68% exact for about 6% too cheap; the sweep
 is in `npm run eval`, pick your side.
 
 Tool labels list only the tools a turn strictly cannot be done without, so a defensible

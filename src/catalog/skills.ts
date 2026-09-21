@@ -9,7 +9,7 @@
  * **Declaration order is the heuristic's precedence.** Jev does not care — a
  * Choice's criteria is a map — but the offline fallback takes the first card
  * whose `hints` match, so specific entries go above general ones. `docx-to-trello`
- * sits above `trello-cli` here, and `ita-review-code` above `code-review`, for
+ * sits above `trello-cli` here, and `team-code-review` above `code-review`, for
  * exactly that reason.
  * ─────────────────────────────────────────────────────────────────────────────
  *
@@ -42,28 +42,28 @@ export const SKILLS = {
       "Board, list and card operations through the Trello CLI: listing what is open, moving a card between lists, adding or commenting. Works from an existing board; it does not import anything.",
     hints: [/\btrello\b/i],
   },
-  "ita-create-pr": {
-    description: "Open a GitHub pull request using the ITA template: title, description, checklist.",
-    notFor: "Making the commit itself, which is ita-commit.",
+  "create-pr": {
+    description: "Open a GitHub pull request using the team template: title, description, checklist.",
+    notFor: "Making the commit itself, which is commit.",
     examples: ["abrí el PR", "subí esto a review"],
     detail:
       "Opens a pull request against the current branch using the team template: a title in Conventional Commits form, a description of what changed and why, a reviewer checklist. Assumes the work is already committed and pushed.",
     hints: [/\b(pull request|pr\b|abrir? el pr|subir? a review)\b/i],
   },
-  "ita-commit": {
-    description: "Commit staged work with a Conventional Commits message in the ITA team format.",
-    notFor: "Opening a pull request, which is ita-create-pr.",
+  "commit": {
+    description: "Commit staged work with a Conventional Commits message in the team's format.",
+    notFor: "Opening a pull request, which is create-pr.",
     examples: ["commiteá esto", "hacé el commit de los cambios"],
     detail:
       "Stages the right files and writes a Conventional Commits message in the team's format. Ends at the commit: it does not push and it does not open anything.",
     hints: [/\b(commit\w*|commitea\w*)\b/i],
   },
-  "ita-review-code": {
-    description: "Review ITA team code for bugs, security, performance and quality before it merges.",
+  "team-code-review": {
+    description: "Review the team's code for bugs, security, performance and quality before it merges.",
     notFor: "A security-only audit of a branch, which is security-review.",
     examples: ["revisá este código", "mirá si esto está bien"],
     detail:
-      "Reviews a change against the ITA team's own playbook — their conventions, their past incidents, their definition of done — as well as for bugs, security and performance. Use when the standard being applied is the team's, not a generic one.",
+      "Reviews a change against the team's own playbook — their conventions, their past incidents, their definition of done — as well as for bugs, security and performance. Use when the standard being applied is the team's, not a generic one.",
     hints: [/\b(revis\w*|review)\b.*\b(codigo|code)\b/i],
   },
   "security-review": {
@@ -153,7 +153,7 @@ export const SKILLS = {
   },
   "code-review": {
     description: "Review the current diff, a PR or a branch for correctness bugs and cleanups.",
-    notFor: "Reviewing code against the ITA team playbook, which is ita-review-code.",
+    notFor: "Reviewing code against the team's playbook, which is team-code-review.",
     examples: ["revisá el diff antes de mergear", "is this change safe?"],
     detail:
       "Reviews a diff, a pull request or a branch for correctness bugs first, then for reuse, simplification and efficiency. Generic standards, not any one team's playbook.",
