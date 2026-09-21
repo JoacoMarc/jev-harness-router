@@ -13,7 +13,7 @@ call, in about 350 ms, behind a deadline it is not allowed to miss.
 | **tools** | one `Noul` per tool, plus the tail of a ranking `Choice` |
 | **skill** | one `Choice` over the catalogue, gated by four request-shape `Noul`s |
 
-![npm run route: six turns routed live, with the reasons for each decision](docs/route-demo.gif)
+![npm run route: six turns routed live, with the reasons for each decision](https://raw.githubusercontent.com/JoacoMarc/jev-harness-router/main/docs/route-demo.gif)
 
 ```ts
 import { createRouter, defineCatalog } from "jev-harness-router";
