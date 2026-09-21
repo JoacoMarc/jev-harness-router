@@ -29,7 +29,8 @@ const dumpPath = argv.includes("--dump") ? argv[argv.indexOf("--dump") + 1] : un
 const replayPath = argv.includes("--replay") ? argv[argv.indexOf("--replay") + 1] : undefined;
 const WORKERS = 8;
 
-const fixtures = await readFixtures();
+const fixturesPath = argv.includes("--fixtures") ? argv[argv.indexOf("--fixtures") + 1] : undefined;
+const fixtures = await readFixtures(fixturesPath);
 console.log(`\n${fixtures.length} labelled turns, ${structured ? "structured" : "string"} skill criteria\n`);
 
 // ---------------------------------------------------------------- collect

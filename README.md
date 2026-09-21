@@ -43,9 +43,10 @@ route.skill;   // "debug" | null
 route.source;  // "jev" | "cache" | "shortcut" | "fallback"
 ```
 
-Against a keyword baseline on 54 labelled turns it picks the right skill **94.4%** of the
-time against 81.5%, and under-provisions the model on **1.9%** of turns against 31.5%.
-Full numbers and how they were measured are [below](#what-it-actually-does).
+Against a keyword baseline on 181 labelled turns — 127 of them real, pulled from the
+author's own Claude Code sessions — it picks the right skill **90.0%** of the time against
+59.4%, and under-provisions the model on **3.3%** of turns against 19.9%. Full numbers, and
+the one input that made them possible, are [below](#what-it-actually-does).
 
 ---
 
@@ -287,27 +288,33 @@ curves.
 
 ## What it actually does
 
-Against `fixtures/turns.jsonl` — 54 labelled turns, 24 skills, 11 tools, 20 questions per
-request — on `jev-1.13.0`:
+Against `fixtures/turns.jsonl` — 181 labelled turns, 24 skills, 11 tools, 20 questions per
+request — on `jev-1.13.0`. 54 of the turns were written for the router; 127 are real ones
+from the author's Claude Code sessions, anonymised, 109 of them carrying the previous
+assistant reply as `recentContext`, which is what a harness would hand the router:
 
 | | keyword baseline | router | |
 | --- | --- | --- | --- |
-| skill exact | 81.5% | **94.4%** | +13.0pp |
-| skill missed | 28.0% | **4.0%** | +24.0pp |
-| skill false positive | **3.4%** | 6.9% | −3.4pp |
-| tier too cheap | 31.5% | **1.9%** | +29.6pp |
-| tier within 1 | 92.6% | 92.6% | ±0 |
-| tier exact | **64.8%** | 53.7% | −11.1pp |
-| tool recall | 61.2% | **68.6%** | +7.4pp |
-| tool precision | **58.7%** | 52.9% | −5.8pp |
+| skill exact | 59.4% | **90.0%** | +30.6pp |
+| skill missed | 30.4% | **14.3%** | +16.1pp |
+| skill false positive | 36.3% | **8.1%** | +28.2pp |
+| tier too cheap | 19.9% | **3.3%** | +16.6pp |
+| tier within 1 | 95.0% | 95.0% | ±0 |
+| tier exact | 59.7% | **63.0%** | +3.3pp |
+| tool recall | 60.6% | **69.1%** | +8.5pp |
+| tool precision | 39.2% | **55.9%** | +16.7pp |
 
-Read the tier rows together. The baseline hits the exact tier more often but
-under-provisions on a third of turns; the router matches it on staying within one tier and
-under-provisions on 1.9%. **Too big shows up on the bill. Too small shows up as a worse
-answer nobody notices** — so the estimator is deliberately biased against it.
+The regex baseline held up on the 54 turns written for it and fell apart on the real ones:
+its skill hints fire on a third of turns where no skill applies. Read the tier rows together.
+Both land within one tier 95% of the time; the baseline under-provisions on a fifth of
+turns, the router on 3.3%. **Too big shows up on the bill. Too small shows up as a worse
+answer nobody notices** — so the estimator is deliberately biased against it. Reading the
+median instead (`difficultyQuantile: 0.5`) buys 68.0% exact for 6.1% too cheap; the sweep
+is in `npm run eval`, pick your side.
 
-The tool-precision loss is partly a labelling artefact: the fixtures list only the tools a
-turn strictly cannot be done without, so a defensible extra tool scores as an error.
+Tool labels list only the tools a turn strictly cannot be done without, so a defensible
+extra tool scores against precision, and the real turns leave `tools` unscored where the
+context does not settle it.
 
 Latency, across five benchmark runs on different days:
 
@@ -428,8 +435,17 @@ reports the fourth. That is the honest boundary between a router and an agent.
 
 ## What the measurements changed
 
-Six things here are the way they are because a measurement said so, not because they
+Seven things here are the way they are because a measurement said so, not because they
 seemed right.
+
+**Without `recentContext` the router is worse than the regexes.** Real turns are mostly
+context-dependent — «si haz ambas», «deja el hook andando», «que pongo en cada uno». Routed
+bare, Jev hit the exact tier on 34.6% of the 127 real turns against the heuristic's 69.3%,
+and put 19% of them *two* tiers off: the difficulty question reads an unanswerable message
+as "the shape of the work has to be figured out first", which is level 3, and the 0.60
+quantile believes it. Handing it the previous assistant reply — about 600 characters — took
+exact to 59.8% and off-by-two to 4%. The questions are the easy part; what you put in the
+state is the router.
 
 **Route on the distribution, not the expectation.** Asked how much work "escribí el ADR de
 por qué elegimos Kafka sobre SQS" needs, Jev answered
@@ -480,6 +496,7 @@ npm run chat -- "<turn>"
 
 npm run calibrate                        # measure your network, write your deadline
 npm run eval                             # accuracy vs the baseline, plus sweeps
+npm run eval -- --fixtures <path>        # against your own labelled turns
 npm run eval -- --replay <dump>          # re-sweep offline, zero API calls
 npm run eval -- --strings                # A/B plain string skill criteria
 npm run bench                            # percentiles, batching ablation, deadline curve
@@ -522,10 +539,12 @@ test/catalog.test.ts     the whole router on a catalogue that is not the shipped
 Three things here are empirical, and copying them across setups is how a router looks good
 in a README and bad in production.
 
-1. **The fixtures.** `fixtures/turns.jsonl` is 54 turns written and labelled by one
-   person, in Spanish and English. Replace them with real turns from your own harness,
-   labelled with the route you actually wanted. This is the part that takes real effort
-   and the part that makes everything downstream mean anything.
+1. **The fixtures.** `fixtures/turns.jsonl` is 181 turns — 54 written for the router, 127
+   taken from one person's real sessions — all labelled by that same person, in Spanish
+   and English, against one team's skills. Replace them with real turns from your own
+   harness, labelled with the route you actually wanted, and pass the previous reply as
+   `recentContext` the way your harness would. This is the part that takes real effort and
+   the part that makes everything downstream mean anything.
 2. **The thresholds.** Fitted to those fixtures. Sweep them on yours. Watch for a sweep
    with no interior peak — that means a question is missing, not a number.
 3. **The deadline.** `npm run calibrate`, and re-run it if you move or your network

@@ -110,8 +110,14 @@ export interface Thresholds {
  *   outright, and for a router recall matters more than precision: a missing tool blocks
  *   the turn, an extra one costs a little context.
  *
- * Fifty-four labelled turns is a small sample and the labels are one person's judgement.
- * Re-run the sweep on your own traffic before trusting these to three decimal places.
+ * Re-swept in September 2026 on 181 turns, 127 of them real ones from the author's Claude
+ * Code sessions with the previous reply as `recentContext`: gate 0.20 is still the
+ * interior optimum (90.0% skill accuracy, 8.1% false positives at skillConfidence 0.60);
+ * skillConfidence 0.70 edges it on that set (91.7%, 5.6%, same misses) and is left alone
+ * until a second sample agrees. difficultyQuantile 0.60 gives 63.0% exact tier at 3.3%
+ * under-provisioned; 0.50 gives 68.0% at 6.1%. The labels are still one person's
+ * judgement. Re-run the sweep on your own traffic before trusting these to three decimal
+ * places.
  * `tierCuts` in particular assumes a three-tier ladder; a catalogue with two or four
  * tiers should pass its own.
  */
