@@ -1,6 +1,6 @@
 {
   "name": "jev-harness-router",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Per-turn harness router: one Jev call picks the model tier, tools, skill and effort budget for an agent turn.",
   "type": "module",
   "main": "./dist/index.js",
